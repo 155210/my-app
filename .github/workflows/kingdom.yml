@@ -1,0 +1,48 @@
+name: Build Kingdom Guard APK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'kingdom/**'
+      - '.github/workflows/kingdom.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+
+      # ubuntu 运行器自带 Android SDK（$ANDROID_HOME），无需额外安装
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Build Kingdom Guard APK
+        run: gradle :kingdom:assembleRelease --no-daemon
+
+      - name: Rename APK
+        run: cp kingdom/build/outputs/apk/release/kingdom-release.apk KingdomGuard.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KingdomGuard
+          path: KingdomGuard.apk
+
+      # 发布到 Releases，手机浏览器打开仓库的 Releases 页面就能直接下载 APK（不用登录、不是 zip）
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: kingdom-${{ github.run_number }}
+          name: 小小王国守卫战 build ${{ github.run_number }}
+          make_latest: true
+          files: KingdomGuard.apk

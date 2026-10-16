@@ -1,0 +1,41 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.example.kingdom'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.example.kingdomguard'
+        minSdk 21
+        targetSdk 34
+        versionCode 1
+        versionName '1.0'
+    }
+
+    // 固定签名：每次 Actions 打出来的包签名一致，手机上可以直接覆盖安装更新
+    signingConfigs {
+        fixed {
+            storeFile file('kingdom.keystore')
+            storePassword 'kingdom123'
+            keyAlias 'kingdom'
+            keyPassword 'kingdom123'
+        }
+    }
+
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.fixed
+        }
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.fixed
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
