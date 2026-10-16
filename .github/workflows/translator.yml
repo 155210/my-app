@@ -1,0 +1,59 @@
+name: Build Novel Translate APK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'translator/**'
+      - '.github/workflows/translator.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+
+      # ubuntu 运行器自带 Android SDK（$ANDROID_HOME），无需额外安装
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Build Novel Translate APK
+        run: |
+          set -o pipefail
+          gradle :translator:assembleRelease --no-daemon 2>&1 | tee build.log
+
+      # 编译失败时把错误行挂成注解，不用下载日志就能在 Actions 页面直接看到哪一行错了
+      - name: Report build errors
+        if: failure()
+        run: |
+          grep -nE "error:|ERROR|e: |What went wrong|\.java:[0-9]+:" -A3 build.log | head -120 > errs.txt || true
+          if [ ! -s errs.txt ]; then tail -60 build.log > errs.txt; fi
+          msg=$(sed -e 's/%/%25/g' -e 's/\r/%0D/g' errs.txt | sed ':a;N;$!ba;s/\n/%0A/g')
+          echo "::error title=Build failed::$msg"
+
+      - name: Rename APK
+        run: cp translator/build/outputs/apk/release/translator-release.apk NovelTranslate.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NovelTranslate
+          path: NovelTranslate.apk
+
+      # 发布到 Releases：手机浏览器打开仓库的 Releases 页面就能直接下载 APK（不用登录、不是 zip）
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: translator-${{ github.run_number }}
+          name: 小说翻译 build ${{ github.run_number }}
+          make_latest: true
+          files: NovelTranslate.apk

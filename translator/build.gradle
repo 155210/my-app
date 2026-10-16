@@ -1,0 +1,41 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.example.noveltranslate'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.example.noveltranslate'
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName '1.0'
+    }
+
+    // 固定签名：每次 Actions 打出来的包签名一致，手机上可以直接覆盖安装更新，翻译进度不会丢
+    signingConfigs {
+        fixed {
+            storeFile file('translator.keystore')
+            storePassword 'translator123'
+            keyAlias 'translator'
+            keyPassword 'translator123'
+        }
+    }
+
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.fixed
+        }
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.fixed
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
