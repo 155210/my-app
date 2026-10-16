@@ -16,3 +16,4 @@ rootProject.name = "TapGame"
 include ':app'
 include ':kingdom'
 include ':translator'
+include ':toolbox'

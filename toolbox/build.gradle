@@ -1,0 +1,48 @@
+plugins {
+    id 'com.android.application'
+}
+
+// 每次 Actions 构建自动递增版本号（本地构建为 1）
+def runNumber = (System.getenv('GITHUB_RUN_NUMBER') ?: '1').toInteger()
+
+android {
+    namespace 'com.example.aitoolbox'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.example.aitoolbox'
+        minSdk 26
+        targetSdk 34
+        versionCode runNumber
+        versionName "1.0.${runNumber}"
+    }
+
+    // 固定签名：每次打出来的包签名一致，手机上可以直接覆盖安装更新，数据保留
+    signingConfigs {
+        fixed {
+            storeFile file('toolbox.keystore')
+            storePassword 'toolbox123'
+            keyAlias 'toolbox'
+            keyPassword 'toolbox123'
+        }
+    }
+
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.fixed
+        }
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.fixed
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation 'androidx.webkit:webkit:1.11.0'
+}

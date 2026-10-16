@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>自制ai工具箱</title>
+<link rel="stylesheet" href="app.css">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="txtToWorldbook/styles/modal.css">
+<!-- 外壳：必须最先加载，负责网络转发 / 文件保存 / 剪贴板 / toastr -->
+<script src="app-bridge.js"></script>
+<script src="vendor/jquery.min.js"></script>
+<script src="vendor/jszip.min.js"></script>
+</head>
+<body>
+<main id="home">
+  <header class="hd">
+    <div class="hd-mark">AI</div>
+    <div>
+      <h1>自制ai工具箱</h1>
+      <p class="hd-sub">小说转世界书 · EPUB 转 TXT · 小说翻译</p>
+    </div>
+  </header>
+
+  <section class="tools">
+    <button class="tool" data-open="worldbook">
+      <span class="tool-ico" style="--c:#e67e22">📚</span>
+      <span class="tool-txt"><b>TXT 转世界书</b><small>AI 提取角色、地点、组织等，导出酒馆世界书 / 角色卡</small></span>
+      <span class="tool-go">›</span>
+    </button>
+    <button class="tool" data-open="epub">
+      <span class="tool-ico" style="--c:#9b59b6">📖</span>
+      <span class="tool-txt"><b>EPUB 转 TXT</b><small>电子书转纯文本，可多本合并</small></span>
+      <span class="tool-go">›</span>
+    </button>
+    <button class="tool" data-open="translate">
+      <span class="tool-ico" style="--c:#3498db">🌐</span>
+      <span class="tool-txt"><b>小说翻译</b><small>TXT 并发翻译成中文，导出带目录的 EPUB / TXT</small></span>
+      <span class="tool-go">›</span>
+    </button>
+  </section>
+
+  <section class="card" id="api-card">
+    <div class="card-hd">
+      <h2>🔑 API 设置</h2>
+      <span class="pill" id="api-state">未设置</span>
+    </div>
+    <p class="hint">这里填一次，「TXT 转世界书」和「小说翻译」都会自动使用。在工具里改了 API，这里也会同步。</p>
+
+    <label class="f">API 提供商
+      <select id="g-provider">
+        <option value="openai-compatible">OpenAI 兼容（中转 / DeepSeek / 本地模型等）</option>
+        <option value="gemini">Gemini</option>
+        <option value="anthropic">Anthropic</option>
+      </select>
+    </label>
+    <label class="f">API 地址 <small id="g-endpoint-hint">例如 https://你的中转站/v1</small>
+      <input id="g-endpoint" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://api.example.com/v1">
+    </label>
+    <label class="f">API Key
+      <div class="pw">
+        <input id="g-key" type="password" autocomplete="off" spellcheck="false" placeholder="sk-...">
+        <button type="button" class="ghost" id="g-key-eye">显示</button>
+      </div>
+    </label>
+    <label class="f">模型
+      <input id="g-model" type="text" autocomplete="off" spellcheck="false" placeholder="例如 gpt-4o-mini / deepseek-chat">
+    </label>
+    <label class="f" id="g-models-wrap" hidden>已拉取的模型（点选填入）
+      <select id="g-models"></select>
+    </label>
+    <div class="row">
+      <button type="button" class="btn" id="g-fetch">拉取模型</button>
+      <button type="button" class="btn" id="g-test">测试连接</button>
+      <button type="button" class="btn primary" id="g-save">保存</button>
+    </div>
+    <div class="status" id="g-status"></div>
+  </section>
+
+  <section class="card small">
+    <p>导出的文件保存在手机的 <b>下载 / 自制ai工具箱</b> 文件夹。任务进度会自动保存，切到后台也会继续跑（通知栏会有一条「运行中」）。</p>
+    <p class="ver" id="ver"></p>
+  </section>
+</main>
+
+<script src="app-home.js"></script>
+<!-- 功能模块 -->
+<script src="epubToTxt.js"></script>
+<script src="novelTranslate.js"></script>
+<script type="module">
+  import { initTxtToWorldbookBridge } from './txtToWorldbook/main.js';
+  initTxtToWorldbookBridge().catch((e) => console.error('[Toolbox] TXT转世界书初始化失败', e));
+  window.__ttwReady = true;
+</script>
+</body>
+</html>
