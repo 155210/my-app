@@ -25,9 +25,9 @@ jobs:
         run: gradle assembleDebug --no-daemon
 
       - name: Rename APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk TapGame.apk
+        run: cp app/build/outputs/apk/debug/app-debug.apk NumberGate.apk
 
       - uses: actions/upload-artifact@v4
         with:
-          name: TapGame-apk
-          path: TapGame.apk
+          name: NumberGate.apk
+          path: NumberGate.apk
