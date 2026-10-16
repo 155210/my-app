@@ -86,7 +86,7 @@ public class GameView extends View {
 
     static class Plot {
         int type, base, unlock, level, paid, route = -1;
-        float x, y, hp, maxHp, cd, dirX, dirY, rallyX, rallyY, pulse;
+        float x, y, sx, sy, hp, maxHp, cd, dirX, dirY, rallyX, rallyY, pulse, aim = 1.57f;
         boolean lockUntilLeave;
 
         int nextCost() { return base * (level + 1); }
@@ -123,6 +123,11 @@ public class GameView extends View {
         int color;
     }
 
+    static class Spark {
+        float x, y, life;
+        long seed;
+    }
+
     static class FText {
         String s;
         float x, y, life, size;
@@ -138,12 +143,12 @@ public class GameView extends View {
     private final ArrayList<Coin> coinsOnGround = new ArrayList<>();
     private final ArrayList<Particle> particles = new ArrayList<>();
     private final ArrayList<FText> texts = new ArrayList<>();
+    private final ArrayList<Spark> sparks = new ArrayList<>();
     private final ArrayList<int[]> spawnQueue = new ArrayList<>();
     private final ArrayList<float[]> trees = new ArrayList<>();
 
     private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint stroke = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint text = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint dash = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Path path = new Path();
     private final RectF rect = new RectF();
@@ -168,7 +173,12 @@ public class GameView extends View {
     private Plot castlePlot;
 
     // 屏幕/摇杆
-    private float sc = 1, offX, offY;
+    private float sc = 1, offX, offY, camX = CASTLE_X, camY = CASTLE_Y + 300, bgScale = 1;
+    // 背景图覆盖的世界范围
+    static final float BX0 = -220, BY0 = -260, BX1 = 1220, BY1 = 2020;
+    private final android.graphics.Rect bgSrc = new android.graphics.Rect();
+    private final RectF bgDst = new RectF();
+    private final Paint bgPaint = new Paint(Paint.FILTER_BITMAP_FLAG);
     private int sw, sh;
     private Bitmap bg;
     private boolean joyOn;
@@ -183,7 +193,6 @@ public class GameView extends View {
         prefs = ctx.getSharedPreferences("kingdom", Context.MODE_PRIVATE);
         best = prefs.getInt("best", 0);
 
-        text.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
         dash.setStyle(Paint.Style.STROKE);
         dash.setStrokeCap(Paint.Cap.ROUND);
 
@@ -209,6 +218,8 @@ public class GameView extends View {
         p.x = x;
         p.y = y;
         p.base = cost;
+        p.sx = x;
+        p.sy = y + 78;
         p.unlock = unlock;
         if (type == T_BARRACKS) {
             float bestD = Float.MAX_VALUE;
@@ -235,6 +246,9 @@ public class GameView extends View {
         p.route = route;
         p.dirX = tmp[2];
         p.dirY = tmp[3];
+        p.sx = p.x - p.dirY * 150;
+        p.sy = p.y + p.dirX * 150;
+        if (p.sx < 60 || p.sx > W - 60) { p.sx = p.x + p.dirY * 150; p.sy = p.y - p.dirX * 150; }
     }
 
     private void resetGame() {
@@ -245,13 +259,14 @@ public class GameView extends View {
         coinsOnGround.clear();
         particles.clear();
         texts.clear();
+        sparks.clear();
         spawnQueue.clear();
 
         addPlot(T_HOUSE, 330, 250, 5, 1);
         addPlot(T_HOUSE, 690, 220, 5, 1);
         addPlot(T_TOWER, 590, 640, 8, 1);
-        addPlot(T_TOWER, 350, 790, 10, 1);
-        addWall(0, 330, 6, 1);
+        addPlot(T_TOWER, 345, 760, 10, 1);
+        addWall(0, 430, 6, 1);
 
         castlePlot = addPlot(T_CASTLE, 660, 380, 20, 2);
         addPlot(T_BARRACKS, 240, 520, 15, 2);
@@ -303,7 +318,7 @@ public class GameView extends View {
             }
             if (bad) continue;
             for (Plot p : plots) {
-                if (dist(x, y, p.x, p.y) < 105) { bad = true; break; }
+                if (dist(x, y, p.x, p.y) < 105 || dist(x, y, p.sx, p.sy) < 70) { bad = true; break; }
             }
             if (bad) continue;
             for (float[] t : trees) {
@@ -322,9 +337,9 @@ public class GameView extends View {
         if (w <= 0 || h <= 0) return;
         sw = w;
         sh = h;
-        sc = Math.min(w / W, h / (H + 60));
-        offX = (w - W * sc) / 2f;
-        offY = (h - H * sc) / 2f + 20 * sc;
+        // 镜头跟随国王：竖屏可见约 640 个世界单位宽
+        sc = w / 640f;
+        updateCamera(1f);
         float bw = 220 * dp, bh = 60 * dp;
         btnNight.set((w - bw) / 2f, h - bh - 24 * dp, (w + bw) / 2f, h - 24 * dp);
         buildBackground();
@@ -332,102 +347,61 @@ public class GameView extends View {
 
     private void buildBackground() {
         if (bg != null) bg.recycle();
-        bg = Bitmap.createBitmap(sw, sh, Bitmap.Config.ARGB_8888);
+        // 背景按 0.8 倍分辨率预渲染整张地图，绘制时放大，节省内存
+        bgScale = sc * 0.8f;
+        int bw = (int) ((BX1 - BX0) * bgScale), bh = (int) ((BY1 - BY0) * bgScale);
+        bg = Bitmap.createBitmap(bw, bh, Bitmap.Config.RGB_565);
         Canvas c = new Canvas(bg);
-        c.drawColor(0xFF63AF7C);
+        c.drawColor(Art.GRASS);
         c.save();
-        c.translate(offX, offY);
-        c.scale(sc, sc);
+        c.scale(bgScale, bgScale);
+        c.translate(-BX0, -BY0);
 
-        // 草地斑块
         Random r = new Random(3);
-        for (int i = 0; i < 70; i++) {
-            fill.setColor(r.nextBoolean() ? 0x1AFFFFFF : 0x14004020);
-            c.drawCircle(-300 + r.nextFloat() * 1600, -400 + r.nextFloat() * 2600, 40 + r.nextFloat() * 120, fill);
+        for (int i = 0; i < 60; i++) {
+            Art.circle(c, r.nextBoolean() ? 0x10FFFFFF : 0x0E00301A,
+                    -300 + r.nextFloat() * 1600, -400 + r.nextFloat() * 2600, 60 + r.nextFloat() * 160);
+        }
+        // 草丛小斑点
+        for (int i = 0; i < 260; i++) {
+            float x = -300 + r.nextFloat() * 1600, y = -400 + r.nextFloat() * 2600;
+            Art.line(c, x, y, x - 3, y - 7, 2, 0x2A1E5A3A);
+            Art.line(c, x, y, x + 3, y - 8, 2, 0x2A1E5A3A);
         }
 
-        // 左侧低多边形山崖
-        drawCliff(c);
+        Art.cliff(c, 11);
 
-        // 土路
-        stroke.setStyle(Paint.Style.STROKE);
-        stroke.setStrokeCap(Paint.Cap.ROUND);
-        stroke.setStrokeJoin(Paint.Join.ROUND);
-        for (int pass = 0; pass < 2; pass++) {
-            stroke.setStrokeWidth(pass == 0 ? 84 : 68);
-            stroke.setColor(pass == 0 ? 0xFFC4AE83 : 0xFFDCC79E);
-            for (Route rt : routes) {
-                path.reset();
-                path.moveTo(rt.x[0], rt.y[0]);
-                for (int i = 1; i < rt.x.length; i++) path.lineTo(rt.x[i], rt.y[i]);
-                c.drawPath(path, stroke);
+        // 土路：柔边 + 轻微起伏的宽度
+        float[][] pass = {{52, 0x40C9B289}, {42, Art.DIRT_EDGE}, {34, Art.DIRT}};
+        for (float[] ps : pass) {
+            for (int ri = 0; ri < routes.size(); ri++) {
+                Route rt = routes.get(ri);
+                for (float d = 0; d < rt.total; d += 6) {
+                    rt.pointAt(d, tmp);
+                    float n = (float) (Math.sin(d * 0.021 + ri * 3) * 5 + Math.sin(d * 0.057 + ri) * 3);
+                    Art.circle(c, (int) ps[1], tmp[0], tmp[1], ps[0] + n);
+                }
             }
         }
-        // 路面小石子
-        fill.setColor(0x33A08660);
         for (Route rt : routes) {
-            for (float d = 10; d < rt.total; d += 23) {
+            for (float d = 20; d < rt.total; d += 34) {
                 rt.pointAt(d, tmp);
-                float ox = (r.nextFloat() - 0.5f) * 44, oy = (r.nextFloat() - 0.5f) * 44;
-                c.drawCircle(tmp[0] + ox, tmp[1] + oy, 2 + r.nextFloat() * 3, fill);
+                Art.oval(c, Art.DIRT_LIGHT, tmp[0] + (r.nextFloat() - 0.5f) * 30, tmp[1] + (r.nextFloat() - 0.5f) * 30,
+                        8 + r.nextFloat() * 10, 4 + r.nextFloat() * 5);
+                Art.circle(c, 0x40A08660, tmp[0] + (r.nextFloat() - 0.5f) * 50, tmp[1] + (r.nextFloat() - 0.5f) * 50, 2 + r.nextFloat() * 2);
             }
         }
-        // 城堡前的空地
-        fill.setColor(0xFFDCC79E);
-        c.drawOval(new RectF(380, 380, 620, 560), fill);
+        // 主城前空地
+        Art.oval(c, Art.DIRT_EDGE, CASTLE_X, CASTLE_Y + 150, 150, 70);
+        Art.oval(c, Art.DIRT, CASTLE_X, CASTLE_Y + 150, 140, 62);
 
-        // 树
-        for (float[] t : trees) drawTree(c, t[0], t[1], t[2]);
-        c.restore();
-    }
-
-    private void drawCliff(Canvas c) {
-        Random r = new Random(11);
-        float y = -300;
-        while (y < 980) {
-            float h = 120 + r.nextFloat() * 120;
-            float edge = 40 + r.nextFloat() * 60 - (y > 700 ? (y - 700) * 0.25f : 0);
-            path.reset();
-            path.moveTo(-400, y);
-            path.lineTo(edge - 30, y - 10);
-            path.lineTo(edge + 20, y + h * 0.4f);
-            path.lineTo(edge, y + h);
-            path.lineTo(-400, y + h + 10);
-            path.close();
-            fill.setColor(0xFFB9B4AB);
-            c.drawPath(path, fill);
-            path.reset();
-            path.moveTo(-400, y);
-            path.lineTo(edge - 30, y - 10);
-            path.lineTo(edge - 10, y + h * 0.35f);
-            path.lineTo(-400, y + h * 0.5f);
-            path.close();
-            fill.setColor(0xFFE2DED7);
-            c.drawPath(path, fill);
-            y += h * 0.8f;
+        // 树和灌木
+        for (int i = 0; i < trees.size(); i++) {
+            float[] t = trees.get(i);
+            if (i % 7 == 3) Art.bush(c, t[0], t[1], t[2]);
+            else Art.pine(c, t[0], t[1], t[2]);
         }
-    }
-
-    private void drawTree(Canvas c, float x, float y, float s) {
-        fill.setColor(0x33000000);
-        rect.set(x - 18 * s + 6, y - 6 * s, x + 18 * s + 10, y + 8 * s);
-        c.drawOval(rect, fill);
-        fill.setColor(0xFF6B4A2E);
-        c.drawRect(x - 3 * s, y - 14 * s, x + 3 * s, y, fill);
-        path.reset();
-        path.moveTo(x, y - 72 * s);
-        path.lineTo(x - 21 * s, y - 10 * s);
-        path.lineTo(x + 21 * s, y - 10 * s);
-        path.close();
-        fill.setColor(0xFF2C7550);
-        c.drawPath(path, fill);
-        path.reset();
-        path.moveTo(x, y - 72 * s);
-        path.lineTo(x, y - 10 * s);
-        path.lineTo(x + 21 * s, y - 10 * s);
-        path.close();
-        fill.setColor(0xFF3A9165);
-        c.drawPath(path, fill);
+        c.restore();
     }
 
     // ======================== 主循环 ========================
@@ -445,7 +419,19 @@ public class GameView extends View {
             updateEffects(dt);
         }
 
-        if (bg != null) c.drawBitmap(bg, 0, 0, null);
+        updateCamera(dt);
+        c.drawColor(Art.GRASS);
+        if (bg != null) {
+            // 屏幕可见的世界区域 -> 背景图像素
+            float wl = -offX / sc, wt = -offY / sc, wr = wl + sw / sc, wb = wt + sh / sc;
+            bgSrc.set((int) ((wl - BX0) * bgScale), (int) ((wt - BY0) * bgScale),
+                    (int) Math.ceil((wr - BX0) * bgScale), (int) Math.ceil((wb - BY0) * bgScale));
+            float k = sc / bgScale;
+            bgDst.set(offX + (BX0 + bgSrc.left / bgScale) * sc, offY + (BY0 + bgSrc.top / bgScale) * sc, 0, 0);
+            bgDst.right = bgDst.left + bgSrc.width() * k;
+            bgDst.bottom = bgDst.top + bgSrc.height() * k;
+            c.drawBitmap(bg, bgSrc, bgDst, bgPaint);
+        }
         else c.drawColor(0xFF63AF7C);
 
         c.save();
@@ -461,6 +447,22 @@ public class GameView extends View {
 
         drawHud(c);
         postInvalidateOnAnimation();
+    }
+
+    private void updateCamera(float dt) {
+        if (sw == 0) return;
+        float tx, ty;
+        if (state == State.MENU) { tx = CASTLE_X; ty = CASTLE_Y + 260; }
+        else if (hDead) { tx = SPAWN_X; ty = SPAWN_Y; }
+        else { tx = hx; ty = hy - 40; }
+        float k = Math.min(1f, dt * 4f);
+        camX += (tx - camX) * k;
+        camY += (ty - camY) * k;
+        float vw = sw / sc / 2f, vh = sh / sc / 2f;
+        camX = clamp(camX, BX0 + vw, BX1 - vw);
+        camY = clamp(camY, BY0 + vh, BY1 - vh);
+        offX = sw / 2f - camX * sc;
+        offY = sh / 2f - camY * sc;
     }
 
     private void update(float dt) {
@@ -483,7 +485,8 @@ public class GameView extends View {
                 if (spawnTimer <= 0) {
                     int[] s = spawnQueue.remove(0);
                     spawnEnemy(s[0], s[1]);
-                    spawnTimer = spawnInterval * (0.6f + rnd.nextFloat() * 0.8f);
+                    // 队内紧凑出发，队与队之间留间隔
+                    spawnTimer = s[2] == 1 ? spawnInterval * (3f + rnd.nextFloat() * 2f) : 0.28f + rnd.nextFloat() * 0.12f;
                 }
             } else if (enemies.isEmpty()) {
                 endNight();
@@ -544,6 +547,7 @@ public class GameView extends View {
                 hSwing = 0.22f;
                 float d = dist(hx, hy, t.x, t.y);
                 if (d > 1) { hFaceX = (t.x - hx) / d; hFaceY = (t.y - hy) / d; }
+                addSpark(t.x, t.y - t.r);
                 damageEnemy(t, hDmg);
                 for (Enemy e : enemies) {
                     if (e != t && !e.dead && dist(e.x, e.y, t.x, t.y) < 55) damageEnemy(e, hDmg * 0.5f);
@@ -570,8 +574,8 @@ public class GameView extends View {
         for (Plot p : plots) {
             if (p.unlock > night) continue;
             if (p.pulse > 0) p.pulse -= dt;
-            float d = dist(hx, hy, p.x, p.y);
-            boolean inside = !hDead && d < 50;
+            float d = p.level == 0 ? dist(hx, hy, p.x, p.y) : dist(hx, hy, p.sx, p.sy);
+            boolean inside = !hDead && d < (p.level == 0 ? 52 : 40);
             if (!inside) p.lockUntilLeave = false;
             if (inside && on == null && !p.maxed() && !p.lockUntilLeave) on = p;
         }
@@ -643,7 +647,8 @@ public class GameView extends View {
                     Enemy t = nearestEnemy(p.x, p.y, range);
                     if (t != null) {
                         p.cd = 1.0f - 0.18f * p.level;
-                        fireArrow(p.x, p.y - 80 - p.level * 10, t, 10 + 7 * p.level, false);
+                        p.aim = (float) Math.atan2(t.y - p.y, t.x - p.x);
+                        fireArrow(p.x, p.y - 72 - p.level * 14, t, 10 + 7 * p.level, false);
                     }
                 }
             }
@@ -654,7 +659,7 @@ public class GameView extends View {
                 Enemy t = nearestEnemy(CASTLE_X, CASTLE_Y + 40, 330);
                 if (t != null) {
                     cCd = 1.1f - 0.15f * castlePlot.level;
-                    fireArrow(CASTLE_X, CASTLE_Y - 150, t, 16 * castlePlot.level, true);
+                    fireArrow(CASTLE_X - 25, CASTLE_Y - 200, t, 16 * castlePlot.level, true);
                 }
             }
         }
@@ -691,6 +696,7 @@ public class GameView extends View {
             float step = 1000 * dt;
             if (d <= step + 4) {
                 if (a.target != null && !a.target.dead) {
+                    addSpark(a.tx, a.ty);
                     damageEnemy(a.target, a.dmg);
                     if (a.big) {
                         for (Enemy e : enemies) {
@@ -763,12 +769,12 @@ public class GameView extends View {
         float hp, sp, dmg, rad;
         int rew;
         switch (kind) {
-            case 1: hp = 20; sp = 112; dmg = 4; rad = 14; rew = 1; break;      // 快腿小鬼
+            case 1: hp = 14; sp = 112; dmg = 4; rad = 14; rew = 1; break;      // 快腿小鬼
             case 2: hp = 140; sp = 42; dmg = 14; rad = 25; rew = 3; break;     // 蛮牛
             case 3: hp = 750; sp = 34; dmg = 30; rad = 38; rew = 20; break;    // 首领
-            default: hp = 32; sp = 62; dmg = 6; rad = 17; rew = 1; break;      // 红帽兵
+            default: hp = 22; sp = 62; dmg = 6; rad = 17; rew = 1; break;      // 红帽兵
         }
-        float mult = 1 + 0.2f * (night - 1);
+        float mult = 1 + 0.15f * (night - 1);
         e.maxHp = hp * mult;
         e.hp = e.maxHp;
         e.speed = sp * (0.92f + rnd.nextFloat() * 0.16f);
@@ -854,7 +860,14 @@ public class GameView extends View {
                 wx += e.lane;
                 wy += 10;
             }
-            if (dist(e.x, e.y, wx, wy) < 8) e.wp++;
+            boolean last = e.wp == r.x.length - 1;
+            boolean reached = dist(e.x, e.y, wx, wy) < (last ? 10 : 26);
+            if (!reached && !last && e.wp > 0) {
+                // 被挤过了路点（沿路段方向已越过）也算到达，避免互相推挤卡住
+                float sx = r.x[e.wp] - r.x[e.wp - 1], sy = r.y[e.wp] - r.y[e.wp - 1];
+                reached = (e.x - r.x[e.wp]) * sx + (e.y - r.y[e.wp]) * sy > 0;
+            }
+            if (reached) e.wp++;
             else step(e, wx, wy, dt);
         }
 
@@ -950,19 +963,22 @@ public class GameView extends View {
         spawnQueue.clear();
         ArrayList<Integer> act = new ArrayList<>();
         for (int i = 0; i < routes.size(); i++) if (routes.get(i).fromNight <= night) act.add(i);
-        int total = 5 + night * 3;
+        int total = 8 + night * 4;
+        // 敌人成队出现（同一队走同一条路），看起来像一条长长的红色队伍
+        int squad = 3 + night / 2, gi = 0;
         for (int i = 0; i < total; i++) {
+            if (i > 0 && i % squad == 0) gi++;
             int kind = 0;
             float r = rnd.nextFloat();
             if (night >= 2 && r < 0.25f) kind = 1;
             else if (night >= 3 && r < 0.25f + Math.min(0.3f, 0.05f * night)) kind = 2;
-            spawnQueue.add(new int[]{kind, act.get(i % act.size())});
+            spawnQueue.add(new int[]{kind, act.get(gi % act.size()), i % squad == squad - 1 ? 1 : 0});
         }
         if (night % 5 == 0) {
-            for (int b = 0; b < night / 5; b++) spawnQueue.add(new int[]{3, act.get(b % act.size())});
+            for (int b = 0; b < night / 5; b++) spawnQueue.add(new int[]{3, act.get(b % act.size()), 1});
         }
         spawnTimer = 1.2f;
-        spawnInterval = Math.max(0.3f, 1.1f - 0.05f * night);
+        spawnInterval = Math.max(0.5f, 1.2f - 0.05f * night);
         showBanner(night % 5 == 0 ? "第 " + night + " 夜 · 首领来袭!" : "第 " + night + " 夜 · 敌人来袭!");
     }
 
@@ -1026,6 +1042,16 @@ public class GameView extends View {
         }
     }
 
+    private void addSpark(float x, float y) {
+        if (sparks.size() > 40) return;
+        Spark k = new Spark();
+        k.x = x;
+        k.y = y;
+        k.life = 0.25f;
+        k.seed = rnd.nextLong();
+        sparks.add(k);
+    }
+
     private void addText(String s, float x, float y, int color, float size) {
         FText t = new FText();
         t.s = s;
@@ -1051,6 +1077,11 @@ public class GameView extends View {
             p.y += p.vy * dt;
             p.vy += 400 * dt;
         }
+        for (int i = sparks.size() - 1; i >= 0; i--) {
+            Spark k = sparks.get(i);
+            k.life -= dt;
+            if (k.life <= 0) sparks.remove(i);
+        }
         for (int i = texts.size() - 1; i >= 0; i--) {
             FText t = texts.get(i);
             t.life -= dt;
@@ -1060,20 +1091,74 @@ public class GameView extends View {
     }
 
     // ======================== 绘制世界 ========================
+    private final ArrayList<Object> drawList = new ArrayList<>();
+    private static final Object HERO = new Object(), CASTLE = new Object();
+
+    private float footY(Object o) {
+        if (o == HERO) return hy;
+        if (o == CASTLE) return CASTLE_Y + 82;
+        if (o instanceof Enemy) return ((Enemy) o).y;
+        if (o instanceof Soldier) return ((Soldier) o).y;
+        return ((Plot) o).y;
+    }
+
     private void drawWorld(Canvas c) {
-        drawCastle(c);
+        // 1) 地面层：地块、金币
         for (Plot p : plots) {
             if (p.unlock > night) continue;
-            drawPlot(c, p);
+            if (p.level == 0) {
+                float pulse = p.pulse > 0 ? 1 + 0.12f * (float) Math.sin(p.pulse * 18) : 1;
+                int cost = p.nextCost();
+                Art.plotPad(c, p.x, p.y, pulse, time, p.paid / (float) cost, String.valueOf(cost - p.paid),
+                        p.type == T_CASTLE ? "城堡升级" : TYPE_NAME[p.type]);
+            } else if (!p.maxed() && !hDead && dist(hx, hy, p.sx, p.sy) < 220) {
+                int cost = p.nextCost();
+                Art.plotPad(c, p.sx, p.sy, 0.62f, time, p.paid / (float) cost, String.valueOf(cost - p.paid), "升级");
+            }
         }
-        for (Coin k : coinsOnGround) drawCoin(c, k);
-        for (Enemy e : enemies) if (!e.dead) drawEnemy(c, e);
-        for (Soldier s : soldiers) if (!s.dead) drawSoldier(c, s);
-        if (!hDead) drawHero(c);
-        else if (state == State.PLAY) {
-            drawLabel(c, "复活 " + (int) Math.ceil(hRespawn), SPAWN_X, SPAWN_Y, 30, 0xFFFFFFFF);
+        for (Coin k : coinsOnGround) {
+            if (k.life < 5 && ((int) (k.life * 8)) % 2 == 0) continue;
+            Art.oval(c, 0x33103020, k.x + 2, k.y + 3, 9, 4);
+            Art.coin(c, k.x, k.y - k.z - 7, 10);
         }
-        for (Arrow a : arrows) drawArrow(c, a);
+
+        // 2) 立体层：按脚底 y 排序
+        drawList.clear();
+        drawList.add(CASTLE);
+        for (Plot p : plots) if (p.level > 0) drawList.add(p);
+        for (Enemy e : enemies) if (!e.dead) drawList.add(e);
+        for (Soldier s : soldiers) if (!s.dead) drawList.add(s);
+        if (!hDead) drawList.add(HERO);
+        Collections.sort(drawList, (a, b) -> Float.compare(footY(a), footY(b)));
+        for (Object o : drawList) {
+            if (o == CASTLE) {
+                Art.townHall(c, CASTLE_X, CASTLE_Y, castlePlot.level, time, cHit > 0);
+                if (cHp < cMax) drawBar(c, CASTLE_X, CASTLE_Y - 230 - castlePlot.level * 8, 200, 14, cHp / cMax, 0xFF4CD964);
+            } else if (o == HERO) {
+                Art.king(c, hx, hy, hFaceX, hFaceY, hWalk, hSwing, time);
+                if (hHp < hMax) drawBar(c, hx, hy - 84, 56, 8, hHp / hMax, 0xFF4CD964);
+            } else if (o instanceof Enemy) {
+                Enemy e = (Enemy) o;
+                Art.brute(c, e.x, e.y, e.r, e.kind, e.faceX, e.faceY, e.phase, e.hit > 0);
+                if (e.hp < e.maxHp) drawBar(c, e.x, e.y - e.r * 2.6f - 10, e.r * 2.6f, 7, e.hp / e.maxHp, 0xFFFF4D4D);
+            } else if (o instanceof Soldier) {
+                Soldier s = (Soldier) o;
+                Art.knight(c, s.x, s.y, s.swing, time * 8 + s.idx);
+                if (s.hp < s.maxHp) drawBar(c, s.x, s.y - 52, 30, 5, s.hp / s.maxHp, 0xFF4CD964);
+            } else {
+                drawBuilding(c, (Plot) o);
+            }
+        }
+        if (hDead && state == State.PLAY) {
+            outlined(c, "复活 " + (int) Math.ceil(hRespawn), SPAWN_X, SPAWN_Y, 30, 0xFFFFFFFF);
+        }
+
+        // 3) 飞行物与特效
+        for (Arrow a : arrows) {
+            if (a.big) Art.fireball(c, a.x, a.y, time);
+            else Art.bolt(c, a.x, a.y, a.vx, a.vy);
+        }
+        for (Spark k : sparks) Art.spark(c, k.x, k.y, k.life, k.seed);
         for (Particle p : particles) {
             fill.setColor(p.color);
             fill.setAlpha((int) (255 * Math.max(0, p.life / p.max)));
@@ -1082,452 +1167,39 @@ public class GameView extends View {
         fill.setAlpha(255);
         for (FText t : texts) {
             int a = (int) (255 * Math.min(1, t.life / 0.6f));
-            drawLabel(c, t.s, t.x, t.y, t.size, (t.color & 0x00FFFFFF) | (a << 24));
+            outlined(c, t.s, t.x, t.y, t.size, (t.color & 0x00FFFFFF) | (a << 24));
         }
     }
 
-    private void shadow(Canvas c, float x, float y, float rx, float ry) {
-        fill.setColor(0x38000000);
-        rect.set(x - rx, y - ry, x + rx, y + ry);
-        c.drawOval(rect, fill);
-    }
-
-    private void drawCastle(Canvas c) {
-        float x = CASTLE_X, y = CASTLE_Y;
-        int lv = castlePlot.level;
-        shadow(c, x + 10, y + 85, 130, 30);
-        int stone = cHit > 0 ? 0xFFFFE0E0 : 0xFFD3C7B2;
-        // 侧塔
-        for (int s = -1; s <= 1; s += 2) {
-            float tx = x + s * 92;
-            fill.setColor(0xFFB9AC95);
-            c.drawRect(tx - 26, y - 110 - lv * 10, tx + 26, y + 85, fill);
-            fill.setColor(stone);
-            c.drawRect(tx - 26, y - 110 - lv * 10, tx + 10, y + 85, fill);
-            path.reset();
-            path.moveTo(tx - 34, y - 108 - lv * 10);
-            path.lineTo(tx + 34, y - 108 - lv * 10);
-            path.lineTo(tx, y - 170 - lv * 14);
-            path.close();
-            fill.setColor(0xFF3B67C2);
-            c.drawPath(path, fill);
-        }
-        // 城墙主体
-        fill.setColor(0xFFBDAF97);
-        c.drawRect(x - 70, y - 40, x + 70, y + 85, fill);
-        fill.setColor(stone);
-        c.drawRect(x - 70, y - 40, x + 70, y + 60, fill);
-        for (int i = 0; i < 6; i++) c.drawRect(x - 70 + i * 26, y - 56, x - 56 + i * 26, y - 40, fill);
-        // 主楼
-        fill.setColor(0xFFC8BBA4);
-        c.drawRect(x - 42, y - 130, x + 42, y - 40, fill);
-        path.reset();
-        path.moveTo(x - 52, y - 128);
-        path.lineTo(x + 52, y - 128);
-        path.lineTo(x, y - 200 - lv * 12);
-        path.close();
-        fill.setColor(0xFF2F58AE);
-        c.drawPath(path, fill);
-        // 旗帜
-        stroke.setStyle(Paint.Style.STROKE);
-        stroke.setStrokeWidth(4);
-        stroke.setColor(0xFF5A3D24);
-        float fy = y - 200 - lv * 12;
-        c.drawLine(x, fy, x, fy - 50, stroke);
-        path.reset();
-        float wave = (float) Math.sin(time * 4) * 5;
-        path.moveTo(x, fy - 50);
-        path.lineTo(x + 40, fy - 42 + wave);
-        path.lineTo(x, fy - 30);
-        path.close();
-        fill.setColor(0xFF2F7BEA);
-        c.drawPath(path, fill);
-        // 城门
-        fill.setColor(0xFF5A3D24);
-        rect.set(x - 26, y + 20, x + 26, y + 86);
-        c.drawRoundRect(rect, 22, 22, fill);
-        fill.setColor(0xFFFFD54A);
-        c.drawCircle(x, y - 86, 12, fill);
-        if (lv > 0) {
-            fill.setColor(0xFFE9B82E);
-            for (int i = 0; i < lv; i++) c.drawCircle(x - (lv - 1) * 14 + i * 28, y - 10, 7, fill);
-        }
-        // 血条
-        drawBar(c, x, y - 240 - lv * 12, 200, 14, cHp / cMax, 0xFF4CD964);
-    }
-
-    private void drawPlot(Canvas c, Plot p) {
-        boolean near = !hDead && dist(hx, hy, p.x, p.y) < 180;
-        if (p.level == 0) {
-            float pulse = p.pulse > 0 ? 1 + 0.12f * (float) Math.sin(p.pulse * 18) : 1;
-            float rx = 66 * pulse, ry = 50 * pulse;
-            path.reset();
-            path.moveTo(p.x, p.y - ry);
-            path.lineTo(p.x + rx, p.y);
-            path.lineTo(p.x, p.y + ry);
-            path.lineTo(p.x - rx, p.y);
-            path.close();
-            fill.setColor(0x9935804F);
-            c.drawPath(path, fill);
-            dash.setColor(0xF2FFFFFF);
-            dash.setStrokeWidth(5);
-            dash.setPathEffect(new DashPathEffect(new float[]{20, 13}, time * 20));
-            c.drawPath(path, dash);
-            dash.setPathEffect(null);
-            drawCostTag(c, p, p.x, p.y + 4, 36);
-            drawLabel(c, p.type == T_CASTLE ? "升级城堡" : TYPE_NAME[p.type], p.x, p.y + 36, 20, 0xDDFFFFFF);
-            return;
-        }
+    private void drawBuilding(Canvas c, Plot p) {
+        boolean near = !hDead && dist(hx, hy, p.x, p.y) < 200;
         switch (p.type) {
-            case T_TOWER: drawTower(c, p); break;
-            case T_WALL: drawWall(c, p); break;
-            case T_HOUSE: drawHouse(c, p); break;
-            case T_BARRACKS: drawBarracks(c, p); break;
-            case T_CASTLE: drawMonument(c, p); break;
+            case T_TOWER:
+                if (near) {
+                    stroke.setStyle(Paint.Style.STROKE);
+                    stroke.setStrokeWidth(2);
+                    stroke.setColor(0x55FFFFFF);
+                    c.drawCircle(p.x, p.y, 250 + 30 * p.level, stroke);
+                }
+                Art.ballistaTower(c, p.x, p.y, p.level, p.aim);
+                break;
+            case T_WALL:
+                Art.palisade(c, p.x, p.y, p.dirX, p.dirY, p.level, p.hp > 0);
+                if (p.hp > 0 && p.hp < p.maxHp) drawBar(c, p.x, p.y - 90, 90, 10, p.hp / p.maxHp, 0xFFFFB13B);
+                if (p.hp <= 0) outlined(c, "已损坏·天亮修复", p.x, p.y - 34, 18, 0xCCFFFFFF);
+                break;
+            case T_HOUSE:
+                Art.cabin(c, p.x, p.y, p.level, isNight);
+                if (!isNight) outlined(c, "+" + (p.level * 4), p.x, p.y - 108, 20, 0xFFFFE27A);
+                break;
+            case T_BARRACKS:
+                Art.barracks(c, p.x, p.y, p.level, time);
+                break;
+            default:
+                Art.monument(c, p.x, p.y, p.level, time);
+                break;
         }
-        if (!p.maxed() && near) {
-            dash.setColor(0xCCFFFFFF);
-            dash.setStrokeWidth(4);
-            dash.setPathEffect(new DashPathEffect(new float[]{14, 10}, time * 20));
-            rect.set(p.x - 50, p.y - 26, p.x + 50, p.y + 26);
-            c.drawOval(rect, dash);
-            dash.setPathEffect(null);
-            drawCostTag(c, p, p.x, p.y + 52, 26);
-        }
-        if (p.type == T_TOWER && near) {
-            stroke.setStyle(Paint.Style.STROKE);
-            stroke.setStrokeWidth(2);
-            stroke.setColor(0x55FFFFFF);
-            c.drawCircle(p.x, p.y, 250 + 30 * p.level, stroke);
-        }
-    }
-
-    private void drawCostTag(Canvas c, Plot p, float x, float y, float size) {
-        int cost = p.nextCost();
-        String s = (p.level > 0 ? "↑" : "") + (cost - p.paid);
-        text.setTextSize(size);
-        float tw = text.measureText(s);
-        float cx = x - (tw + size * 0.9f) / 2;
-        drawLabelLeft(c, s, cx, y + size * 0.36f, size, 0xFFFFFFFF);
-        drawCoinIcon(c, cx + tw + size * 0.55f, y, size * 0.36f);
-        if (p.paid > 0) {
-            stroke.setStyle(Paint.Style.STROKE);
-            stroke.setStrokeWidth(7);
-            stroke.setStrokeCap(Paint.Cap.ROUND);
-            stroke.setColor(0xFFFFD54A);
-            rect.set(x - 40, y - 40, x + 40, y + 40);
-            c.drawArc(rect, -90, 360f * p.paid / cost, false, stroke);
-        }
-    }
-
-    private void drawTower(Canvas c, Plot p) {
-        float x = p.x, y = p.y;
-        int lv = p.level;
-        float h = 52 + lv * 14;
-        shadow(c, x + 8, y + 4, 40, 14);
-        fill.setColor(lv >= 3 ? 0xFF9A9389 : 0xFF7B5232);
-        c.drawRect(x - 28, y - h, x - 20, y, fill);
-        c.drawRect(x + 20, y - h, x + 28, y, fill);
-        stroke.setStyle(Paint.Style.STROKE);
-        stroke.setStrokeWidth(5);
-        stroke.setColor(0xFF6A4529);
-        c.drawLine(x - 24, y - 6, x + 24, y - h + 10, stroke);
-        c.drawLine(x + 24, y - 6, x - 24, y - h + 10, stroke);
-        fill.setColor(0xFF8F5E38);
-        c.drawRect(x - 36, y - h - 12, x + 36, y - h + 4, fill);
-        fill.setColor(0xFFA8744A);
-        c.drawRect(x - 36, y - h - 12, x + 36, y - h - 6, fill);
-        // 弓箭手
-        fill.setColor(0xFF3D7BD9);
-        c.drawCircle(x, y - h - 26, 14, fill);
-        fill.setColor(0xFFF1C27D);
-        c.drawCircle(x, y - h - 42, 9, fill);
-        stroke.setColor(0xFFE9D3A1);
-        stroke.setStrokeWidth(3);
-        rect.set(x + 4, y - h - 44, x + 26, y - h - 12);
-        c.drawArc(rect, -80, 160, false, stroke);
-        if (lv >= 2) {
-            path.reset();
-            path.moveTo(x - 42, y - h - 56);
-            path.lineTo(x + 42, y - h - 56);
-            path.lineTo(x, y - h - 92);
-            path.close();
-            fill.setColor(0xFFB33A2E);
-            c.drawPath(path, fill);
-            stroke.setColor(0xFF6A4529);
-            stroke.setStrokeWidth(4);
-            c.drawLine(x - 34, y - h - 56, x - 34, y - h - 8, stroke);
-            c.drawLine(x + 34, y - h - 56, x + 34, y - h - 8, stroke);
-        }
-        drawPips(c, x, y + 16, lv);
-    }
-
-    private void drawWall(Canvas c, Plot p) {
-        float px = -p.dirY, py = p.dirX;
-        boolean alive = p.hp > 0;
-        int stakes = 9;
-        for (int i = 0; i < stakes; i++) {
-            float o = (i - (stakes - 1) / 2f) * 13;
-            float x = p.x + px * o, y = p.y + py * o;
-            float h = alive ? 46 + p.level * 6 : 12;
-            fill.setColor(0x30000000);
-            c.drawCircle(x + 5, y + 3, 8, fill);
-            if (p.level >= 3 && alive) {
-                fill.setColor(0xFF9A9389);
-                c.drawRect(x - 7, y - 14, x + 7, y + 2, fill);
-            }
-            fill.setColor(alive ? (i % 2 == 0 ? 0xFF9C6A3F : 0xFF8A5C35) : 0xFF6E5038);
-            c.drawRect(x - 6, y - h, x + 6, y, fill);
-            path.reset();
-            path.moveTo(x - 6, y - h);
-            path.lineTo(x + 6, y - h);
-            path.lineTo(x, y - h - 10);
-            path.close();
-            c.drawPath(path, fill);
-        }
-        if (alive && p.level >= 2) {
-            stroke.setStyle(Paint.Style.STROKE);
-            stroke.setStrokeWidth(5);
-            stroke.setColor(0xFF555A60);
-            float o = (stakes - 1) / 2f * 13;
-            c.drawLine(p.x - px * o, p.y - py * o - 24, p.x + px * o, p.y + py * o - 24, stroke);
-        }
-        if (alive && p.hp < p.maxHp) drawBar(c, p.x, p.y - 80, 90, 10, p.hp / p.maxHp, 0xFFFFB13B);
-        if (!alive) drawLabel(c, "已损坏·天亮修复", p.x, p.y - 30, 18, 0xCCFFFFFF);
-        drawPips(c, p.x, p.y + 20, p.level);
-    }
-
-    private void drawHouse(Canvas c, Plot p) {
-        float x = p.x, y = p.y;
-        int lv = p.level;
-        float w = 34 + lv * 4;
-        shadow(c, x + 8, y + 4, w + 10, 14);
-        fill.setColor(0xFFE8DCC4);
-        c.drawRect(x - w, y - 44, x + w, y, fill);
-        fill.setColor(0xFFD6C8AD);
-        c.drawRect(x + w * 0.4f, y - 44, x + w, y, fill);
-        fill.setColor(0xFF5A3D24);
-        c.drawRect(x - 8, y - 24, x + 8, y, fill);
-        fill.setColor(lv >= 2 ? 0xFFFFE08A : 0xFF8FB4D8);
-        c.drawRect(x - w + 8, y - 34, x - w + 20, y - 22, fill);
-        c.drawRect(x + w - 20, y - 34, x + w - 8, y - 22, fill);
-        fill.setColor(0xFF5C3A20);
-        c.drawRect(x + w * 0.4f, y - 92, x + w * 0.4f + 12, y - 60, fill);
-        path.reset();
-        path.moveTo(x - w - 10, y - 44);
-        path.lineTo(x + w + 10, y - 44);
-        path.lineTo(x + w - 6, y - 80);
-        path.lineTo(x - w + 6, y - 80);
-        path.close();
-        fill.setColor(lv >= 3 ? 0xFF3B67C2 : 0xFF7A4E2D);
-        c.drawPath(path, fill);
-        drawPips(c, x, y + 16, lv);
-        if (!isNight) drawLabel(c, "+" + (lv * 4), x, y - 98, 20, 0xFFFFE27A);
-    }
-
-    private void drawBarracks(Canvas c, Plot p) {
-        float x = p.x, y = p.y;
-        int lv = p.level;
-        shadow(c, x + 8, y + 4, 56, 16);
-        fill.setColor(0xFFCDBFA6);
-        c.drawRect(x - 46, y - 50, x + 46, y, fill);
-        fill.setColor(0xFFB9AA8F);
-        c.drawRect(x + 16, y - 50, x + 46, y, fill);
-        fill.setColor(0xFF5A3D24);
-        rect.set(x - 14, y - 32, x + 14, y);
-        c.drawRoundRect(rect, 10, 10, fill);
-        path.reset();
-        path.moveTo(x - 54, y - 50);
-        path.lineTo(x + 54, y - 50);
-        path.lineTo(x + 40, y - 82);
-        path.lineTo(x - 40, y - 82);
-        path.close();
-        fill.setColor(0xFF6E4A2E);
-        c.drawPath(path, fill);
-        stroke.setStyle(Paint.Style.STROKE);
-        stroke.setStrokeWidth(4);
-        stroke.setColor(0xFF4A3220);
-        c.drawLine(x - 40, y - 82, x - 40, y - 130, stroke);
-        path.reset();
-        float wave = (float) Math.sin(time * 5 + x) * 4;
-        path.moveTo(x - 40, y - 130);
-        path.lineTo(x - 6, y - 122 + wave);
-        path.lineTo(x - 40, y - 108);
-        path.close();
-        fill.setColor(0xFF2F7BEA);
-        c.drawPath(path, fill);
-        // 盾徽
-        fill.setColor(0xFFE9B82E);
-        c.drawCircle(x + 26, y - 30, 10, fill);
-        drawPips(c, x, y + 16, lv);
-    }
-
-    private void drawMonument(Canvas c, Plot p) {
-        float x = p.x, y = p.y;
-        shadow(c, x + 6, y + 4, 34, 12);
-        fill.setColor(0xFFB9AC95);
-        c.drawRect(x - 24, y - 30, x + 24, y, fill);
-        fill.setColor(0xFFD3C7B2);
-        c.drawRect(x - 24, y - 30, x + 8, y, fill);
-        drawCrown(c, x, y - 46, 20);
-        drawPips(c, x, y + 16, p.level);
-    }
-
-    private void drawCrown(Canvas c, float x, float y, float s) {
-        path.reset();
-        path.moveTo(x - s, y + s * 0.6f);
-        path.lineTo(x - s, y - s * 0.4f);
-        path.lineTo(x - s * 0.5f, y + s * 0.1f);
-        path.lineTo(x, y - s * 0.7f);
-        path.lineTo(x + s * 0.5f, y + s * 0.1f);
-        path.lineTo(x + s, y - s * 0.4f);
-        path.lineTo(x + s, y + s * 0.6f);
-        path.close();
-        fill.setColor(0xFFF4C430);
-        c.drawPath(path, fill);
-        stroke.setStyle(Paint.Style.STROKE);
-        stroke.setStrokeWidth(2);
-        stroke.setColor(0xFF9C7410);
-        c.drawPath(path, stroke);
-    }
-
-    private void drawPips(Canvas c, float x, float y, int lv) {
-        for (int i = 0; i < lv; i++) {
-            float px = x - (lv - 1) * 9 + i * 18;
-            fill.setColor(0xFF6B4E0E);
-            c.drawCircle(px, y + 1, 7, fill);
-            fill.setColor(0xFFFFD54A);
-            c.drawCircle(px, y, 6, fill);
-        }
-    }
-
-    private void drawEnemy(Canvas c, Enemy e) {
-        float bob = (float) Math.abs(Math.sin(e.phase)) * 4;
-        float x = e.x, y = e.y - bob;
-        shadow(c, e.x + 4, e.y + e.r * 0.6f, e.r * 1.0f, e.r * 0.4f);
-        int body, dark;
-        switch (e.kind) {
-            case 1: body = 0xFFFF6A3D; dark = 0xFFB0401F; break;
-            case 2: body = 0xFFC62828; dark = 0xFF7A1414; break;
-            case 3: body = 0xFF8E2BC9; dark = 0xFF4E137A; break;
-            default: body = 0xFFE53935; dark = 0xFF8E1C1A; break;
-        }
-        if (e.hit > 0) { body = 0xFFFFFFFF; dark = 0xFFDDDDDD; }
-        // 角
-        if (e.kind >= 2) {
-            fill.setColor(0xFFF2EBDC);
-            for (int s = -1; s <= 1; s += 2) {
-                path.reset();
-                path.moveTo(x + s * e.r * 0.5f, y - e.r * 1.1f);
-                path.lineTo(x + s * e.r * 1.05f, y - e.r * 1.9f);
-                path.lineTo(x + s * e.r * 0.85f, y - e.r * 0.9f);
-                path.close();
-                c.drawPath(path, fill);
-            }
-        }
-        fill.setColor(dark);
-        c.drawCircle(x, y - e.r * 0.5f + 3, e.r, fill);
-        fill.setColor(body);
-        c.drawCircle(x, y - e.r * 0.5f, e.r * 0.92f, fill);
-        // 头盔/头
-        fill.setColor(dark);
-        c.drawCircle(x, y - e.r * 1.25f, e.r * 0.55f, fill);
-        fill.setColor(0xFFFFFFFF);
-        float ex = e.faceX * e.r * 0.25f, ey = e.faceY * e.r * 0.15f;
-        c.drawCircle(x - e.r * 0.22f + ex, y - e.r * 1.25f + ey, e.r * 0.13f, fill);
-        c.drawCircle(x + e.r * 0.22f + ex, y - e.r * 1.25f + ey, e.r * 0.13f, fill);
-        if (e.kind == 3) drawCrown(c, x, y - e.r * 1.95f, e.r * 0.45f);
-        // 武器
-        stroke.setStyle(Paint.Style.STROKE);
-        stroke.setStrokeWidth(e.kind >= 2 ? 6 : 4);
-        stroke.setColor(0xFF9E9E9E);
-        float wx = x + e.faceX * e.r * 1.1f, wy = y - e.r * 0.4f + e.faceY * e.r * 0.6f;
-        c.drawLine(wx, wy, wx + e.faceX * e.r * 0.8f, wy + e.faceY * e.r * 0.8f - e.r * 0.5f, stroke);
-        if (e.hp < e.maxHp) drawBar(c, e.x, y - e.r * 2.3f, e.r * 2.6f, 7, e.hp / e.maxHp, 0xFFFF4D4D);
-    }
-
-    private void drawSoldier(Canvas c, Soldier s) {
-        shadow(c, s.x + 3, s.y + 6, 12, 5);
-        fill.setColor(0xFF9FB3CF);
-        c.drawCircle(s.x, s.y - 4, 12, fill);
-        fill.setColor(0xFFDDE6F5);
-        c.drawCircle(s.x, s.y - 6, 10, fill);
-        fill.setColor(0xFF7A8899);
-        c.drawCircle(s.x, s.y - 20, 7, fill);
-        stroke.setStyle(Paint.Style.STROKE);
-        stroke.setStrokeWidth(3);
-        stroke.setColor(0xFF6A4529);
-        float a = s.swing > 0 ? -18 : 0;
-        c.drawLine(s.x + 10, s.y + 4, s.x + 16, s.y - 30 + a * 0.3f, stroke);
-        fill.setColor(0xFF2F7BEA);
-        c.drawRect(s.x - 15, s.y - 12, s.x - 9, s.y + 2, fill);
-        if (s.hp < s.maxHp) drawBar(c, s.x, s.y - 36, 30, 5, s.hp / s.maxHp, 0xFF4CD964);
-    }
-
-    private void drawHero(Canvas c) {
-        float bob = (float) Math.abs(Math.sin(hWalk)) * 3;
-        float x = hx, y = hy - bob;
-        shadow(c, hx + 4, hy + 10, 24, 9);
-        // 披风
-        fill.setColor(0xFF2556C9);
-        c.drawCircle(x - hFaceX * 8, y - 12 - hFaceY * 6, 22, fill);
-        // 身体
-        fill.setColor(0xFF8C6A12);
-        c.drawCircle(x, y - 12, 19, fill);
-        fill.setColor(0xFFE9B82E);
-        c.drawCircle(x, y - 14, 17, fill);
-        fill.setColor(0xFFF7D774);
-        c.drawCircle(x - 5, y - 19, 6, fill);
-        // 头 + 王冠
-        fill.setColor(0xFFF1C27D);
-        c.drawCircle(x, y - 38, 11, fill);
-        drawCrown(c, x, y - 52, 10);
-        // 剑
-        double base = Math.atan2(hFaceY, hFaceX);
-        double ang = base + (hSwing > 0 ? (hSwing / 0.22f - 0.5f) * 2.2f : 0.4f);
-        float sx = x + (float) Math.cos(ang) * 14, sy = y - 14 + (float) Math.sin(ang) * 14;
-        stroke.setStyle(Paint.Style.STROKE);
-        stroke.setStrokeCap(Paint.Cap.ROUND);
-        stroke.setStrokeWidth(6);
-        stroke.setColor(0xFFF2F4F8);
-        c.drawLine(sx, sy, sx + (float) Math.cos(ang) * 34, sy + (float) Math.sin(ang) * 34, stroke);
-        if (hSwing > 0) {
-            stroke.setStrokeWidth(4);
-            stroke.setColor(0x88FFFFFF);
-            rect.set(x - 55, y - 69, x + 55, y + 41);
-            c.drawArc(rect, (float) Math.toDegrees(base) - 60, 120, false, stroke);
-        }
-        if (hHp < hMax) drawBar(c, hx, y - 72, 56, 8, hHp / hMax, 0xFF4CD964);
-    }
-
-    private void drawArrow(Canvas c, Arrow a) {
-        stroke.setStyle(Paint.Style.STROKE);
-        stroke.setStrokeCap(Paint.Cap.ROUND);
-        if (a.big) {
-            fill.setColor(0xFFFFE08A);
-            c.drawCircle(a.x, a.y, 9, fill);
-            fill.setColor(0xFFFF9C2A);
-            c.drawCircle(a.x, a.y, 5, fill);
-            return;
-        }
-        stroke.setStrokeWidth(3);
-        stroke.setColor(0xFFF5E6C8);
-        c.drawLine(a.x - a.vx * 22, a.y - a.vy * 22, a.x, a.y, stroke);
-    }
-
-    private void drawCoin(Canvas c, Coin k) {
-        if (k.life < 5 && ((int) (k.life * 8)) % 2 == 0) return;
-        shadow(c, k.x + 2, k.y + 4, 9, 4);
-        drawCoinIcon(c, k.x, k.y - k.z - 6, 10);
-    }
-
-    private void drawCoinIcon(Canvas c, float x, float y, float r) {
-        fill.setColor(0xFFB8860B);
-        c.drawCircle(x, y + r * 0.15f, r, fill);
-        fill.setColor(0xFFFFC928);
-        c.drawCircle(x, y, r, fill);
-        fill.setColor(0xFFFFE27A);
-        c.drawCircle(x - r * 0.25f, y - r * 0.25f, r * 0.45f, fill);
+        Art.pips(c, p.x, p.y + 18, p.level);
     }
 
     private void drawBar(Canvas c, float x, float y, float w, float h, float f, int color) {
@@ -1540,28 +1212,39 @@ public class GameView extends View {
         c.drawRoundRect(rect, h / 2, h / 2, fill);
     }
 
+    static final Paint TEXT = new Paint(Paint.ANTI_ALIAS_FLAG);
+    static {
+        TEXT.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
+    }
+
+    static void outlined(Canvas c, String s, float x, float y, float size, int color) {
+        TEXT.setTextAlign(Paint.Align.CENTER);
+        drawOutlined(c, s, x, y, size, color);
+    }
+
+    static void outlinedLeft(Canvas c, String s, float x, float y, float size, int color) {
+        TEXT.setTextAlign(Paint.Align.LEFT);
+        drawOutlined(c, s, x, y, size, color);
+    }
+
+    private static void drawOutlined(Canvas c, String s, float x, float y, float size, int color) {
+        TEXT.setTextSize(size);
+        TEXT.setStyle(Paint.Style.STROKE);
+        TEXT.setStrokeJoin(Paint.Join.ROUND);
+        TEXT.setStrokeWidth(size * 0.18f);
+        TEXT.setColor((color & 0xFF000000) | 0x002A1A0A);
+        c.drawText(s, x, y, TEXT);
+        TEXT.setStyle(Paint.Style.FILL);
+        TEXT.setColor(color);
+        c.drawText(s, x, y, TEXT);
+    }
+
     private void drawLabel(Canvas c, String s, float x, float y, float size, int color) {
-        text.setTextSize(size);
-        text.setTextAlign(Paint.Align.CENTER);
-        text.setStyle(Paint.Style.STROKE);
-        text.setStrokeWidth(size * 0.16f);
-        text.setColor((color & 0xFF000000) | 0x002A1A0A);
-        c.drawText(s, x, y, text);
-        text.setStyle(Paint.Style.FILL);
-        text.setColor(color);
-        c.drawText(s, x, y, text);
+        outlined(c, s, x, y, size, color);
     }
 
     private void drawLabelLeft(Canvas c, String s, float x, float y, float size, int color) {
-        text.setTextSize(size);
-        text.setTextAlign(Paint.Align.LEFT);
-        text.setStyle(Paint.Style.STROKE);
-        text.setStrokeWidth(size * 0.16f);
-        text.setColor((color & 0xFF000000) | 0x002A1A0A);
-        c.drawText(s, x, y, text);
-        text.setStyle(Paint.Style.FILL);
-        text.setColor(color);
-        c.drawText(s, x, y, text);
+        outlinedLeft(c, s, x, y, size, color);
     }
 
     // ======================== HUD ========================
@@ -1573,7 +1256,7 @@ public class GameView extends View {
         fill.setColor(0x99000000);
         rect.set(14 * u, 34 * u, 150 * u, 78 * u);
         c.drawRoundRect(rect, 22 * u, 22 * u, fill);
-        drawCoinIcon(c, 38 * u, 56 * u, 13 * u);
+        Art.coin(c, 38 * u, 56 * u, 13 * u);
         drawLabelLeft(c, String.valueOf(coins), 58 * u, 65 * u, 26 * u, 0xFFFFE27A);
 
         // 天数
@@ -1589,10 +1272,13 @@ public class GameView extends View {
         c.drawRoundRect(rect, 22 * u, 22 * u, fill);
         drawLabel(c, "最佳 " + best + " 夜", sw - 82 * u, 62 * u, 17 * u, 0xFFFFFFFF);
 
+        // 主城血量
+        drawLabelLeft(c, "主城", 18 * u, 103 * u, 14 * u, 0xFFFFFFFF);
+        drawBar(c, 60 * u + 70 * u, 93 * u, 140 * u, 12 * u, cHp / cMax, cHit > 0 ? 0xFFFF5050 : 0xFF4CD964);
         if (isNight) {
             int left = spawnQueue.size();
             for (Enemy e : enemies) if (!e.dead) left++;
-            drawLabel(c, "剩余敌人 " + left, sw / 2f, 104 * u, 17 * u, 0xFFFFB0B0);
+            drawLabel(c, "剩余敌人 " + left, sw - 80 * u, 104 * u, 16 * u, 0xFFFFB0B0);
         }
 
         // 白天：来袭方向提示 + 开战按钮
@@ -1607,7 +1293,7 @@ public class GameView extends View {
             fill.setColor(0xFFD9442E);
             rect.set(cx - bw, cy - bh, cx + bw, cy + bh);
             c.drawRoundRect(rect, 20 * u, 20 * u, fill);
-            drawLabel(c, "⚔ 迎战第 " + night + " 夜", cx, cy + 9 * u, 24 * u, 0xFFFFFFFF);
+            drawLabel(c, "迎战第 " + night + " 夜", cx, cy + 9 * u, 24 * u, 0xFFFFFFFF);
         }
 
         // 新手提示
@@ -1677,8 +1363,8 @@ public class GameView extends View {
         fill.setColor(0x99000000);
         c.drawRect(0, 0, sw, sh, fill);
         float y = sh * 0.30f;
-        drawCrown(c, sw / 2f, y - 70 * u, 34 * u);
-        drawLabel(c, "小小王国守卫战", sw / 2f, y, 42 * u, 0xFFFFD54A);
+        Art.crown(c, sw / 2f, y - 74 * u, 30 * u);
+        Art.logo(c, "小小王国守卫战", sw / 2f, y, 44 * u);
         drawLabel(c, "白天建造 · 夜晚守城", sw / 2f, y + 40 * u, 20 * u, 0xFFFFFFFF);
         String[] lines = {
                 "· 按住屏幕拖动，控制国王移动",
