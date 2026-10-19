@@ -49,7 +49,7 @@ public class KeepAliveService extends Service {
         PendingIntent pi = PendingIntent.getActivity(this, 0, open, PendingIntent.FLAG_IMMUTABLE);
         Notification n = new Notification.Builder(this, CH)
                 .setSmallIcon(R.drawable.ic_launcher_fg)
-                .setContentTitle("酒馆询问机 正在生成回复")
+                .setContentTitle("自制AI问答机 正在生成回复")
                 .setContentText("切到后台也会继续接收，点此返回")
                 .setContentIntent(pi)
                 .setOngoing(true)

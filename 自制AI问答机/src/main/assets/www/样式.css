@@ -148,6 +148,27 @@ details.think .think-body { white-space: pre-wrap; margin-top: 4px; max-height: 
 .send-btn.stop .i-send { display: none; }
 .send-btn.stop .i-stop { display: block; }
 
+/* 附件 */
+.attach-btn {
+    flex: none; width: 40px; height: 42px; border: 1px solid var(--line); border-radius: 14px; background: var(--bg2); color: var(--dim);
+    display: grid; place-items: center;
+}
+#attach-bar { display: flex; gap: 8px; padding: 8px 10px 0; overflow-x: auto; flex: none; }
+#attach-bar:empty { display: none; }
+.att { position: relative; flex: none; height: 64px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg2); overflow: hidden; }
+.att img { height: 100%; display: block; }
+.att.file { display: flex; align-items: center; padding: 0 28px 0 10px; max-width: 200px; font-size: 13px; color: var(--dim); }
+.att.file span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.att .att-x {
+    position: absolute; top: 3px; right: 3px; width: 22px; height: 22px; border-radius: 50%; border: 0;
+    background: rgba(0,0,0,.65); color: #fff; font-size: 14px; line-height: 22px; padding: 0;
+}
+.msg-atts { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 6px; justify-content: flex-end; }
+.msg-atts img { height: 110px; max-width: 100%; border-radius: 10px; display: block; object-fit: cover; cursor: zoom-in; }
+.msg-atts .fchip { font-size: 12px; border: 1px solid var(--line); border-radius: 8px; padding: 3px 8px; color: var(--dim); background: rgba(0,0,0,.15); }
+.viewer { position: relative; margin: auto; max-width: 100%; max-height: 100%; padding: 12px; }
+.viewer img { max-width: 100%; max-height: 92vh; display: block; margin: auto; border-radius: 8px; }
+
 /* 浮层 */
 .layer { position: fixed; inset: 0; z-index: 20; display: flex; }
 .layer .mask { position: absolute; inset: 0; background: rgba(0, 0, 0, .55); animation: fade .15s; }

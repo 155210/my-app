@@ -1,5 +1,5 @@
 /*
- * 界面.js —— 酒馆询问机的全部界面逻辑
+ * 界面.js —— 自制AI问答机的全部界面逻辑
  *
  *  对话：发送 / 停止 / 重新生成（多版本左右切换）/ 编辑 / 删除 / 复制
  *  顶栏右侧胶囊：切换接口、模型、预设，查看实际发送内容
@@ -44,6 +44,10 @@
     }
 
     async function copyText(t) {
+        // APK 里直接走原生剪贴板，最稳
+        if (bridge && bridge.copyText) {
+            try { bridge.copyText(String(t)); toast('success', '已复制'); return true; } catch (e) { /* 退回下面 */ }
+        }
         try {
             await navigator.clipboard.writeText(t);
             if (!bridge) toast('success', '已复制');
@@ -95,6 +99,7 @@
     const S = {
         settings: null, apis: [], presets: [], chatIndex: [], chat: null,
         gen: null, // { ctrl, msgId }
+        pending: [], // 待发送附件 { type:'image', name, url } | { type:'file', name, text }
     };
 
     const saveSettings = () => Store.set('settings', S.settings);
@@ -225,6 +230,8 @@
 
     function renderMd(text) {
         let html;
+        // 有的模型用 ''' 当代码块，按 ``` 处理
+        text = String(text || '').replace(/^([ \t]*)'''([\w+#.-]*)[ \t]*$/gm, '$1```$2');
         try { html = marked.parse(String(text || '')); } catch (e) { html = '<p>' + esc(text) + '</p>'; }
         html = DOMPurify.sanitize(html, { FORBID_TAGS: ['style', 'form', 'input', 'button', 'iframe'], FORBID_ATTR: ['style'] });
         const box = document.createElement('div');
@@ -269,6 +276,10 @@
         const parts = splitThink(m.content);
         const reasoning = [m.reasoning, parts.think].filter(Boolean).join('\n\n');
         let h = '';
+        if ((m.images && m.images.length) || (m.files && m.files.length)) {
+            h += '<div class="msg-atts">' + (m.images || []).map((u, k) => '<img src="' + esc(u) + '" data-view="' + k + '" alt="图片">').join('')
+                + (m.files || []).map((f) => '<span class="fchip">📄 ' + esc(f.name) + '</span>').join('') + '</div>';
+        }
         if (isA && reasoning) {
             const open = S.settings.thinkOpen || (streaming && !parts.body);
             h += '<details class="think"' + (open ? ' open' : '') + '><summary>思考过程</summary><div class="think-body">' + esc(reasoning) + '</div></details>';
@@ -351,6 +362,8 @@
     }
 
     msgsEl.addEventListener('click', (e) => {
+        const img = e.target.closest('img[data-view]');
+        if (img) { openLayer('viewer', '<img src="' + esc(img.src) + '" alt="图片" data-close>'); return; }
         const b = e.target.closest('.acts button');
         if (!b) return;
         const el = b.closest('.msg');
@@ -510,6 +523,69 @@
     });
     sendBtn.addEventListener('click', () => (S.gen ? stopGen() : onSend()));
 
+    // ---------- 附件 ----------
+    const TEXT_EXT = /\.(txt|md|markdown|json|jsonl|csv|tsv|log|ini|conf|cfg|ya?ml|xml|html?|css|js|mjs|ts|tsx|jsx|py|java|kt|c|cc|cpp|h|hpp|cs|go|rs|rb|php|sh|bat|ps1|sql|lua|swift|vue|toml|srt|ass|lrc)$/i;
+
+    function readImage(file) {
+        // 压到最长边 1600、JPEG，省流量也省存储
+        return new Promise((resolve, reject) => {
+            const url = URL.createObjectURL(file);
+            const img = new Image();
+            img.onload = () => {
+                const max = 1600;
+                let w = img.naturalWidth, h = img.naturalHeight;
+                const k = Math.min(1, max / Math.max(w, h));
+                w = Math.round(w * k); h = Math.round(h * k);
+                const cv = document.createElement('canvas');
+                cv.width = w; cv.height = h;
+                const g = cv.getContext('2d');
+                g.fillStyle = '#fff'; g.fillRect(0, 0, w, h);
+                g.drawImage(img, 0, 0, w, h);
+                URL.revokeObjectURL(url);
+                resolve(cv.toDataURL('image/jpeg', 0.85));
+            };
+            img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('图片读不出来')); };
+            img.src = url;
+        });
+    }
+
+    async function addAttachments(files) {
+        for (const f of files) {
+            try {
+                if (/^image\//.test(f.type) || /\.(png|jpe?g|webp|gif|bmp|heic|heif)$/i.test(f.name)) {
+                    S.pending.push({ type: 'image', name: f.name, url: await readImage(f) });
+                } else if (/^text\//.test(f.type) || TEXT_EXT.test(f.name) || /json|xml|javascript/.test(f.type)) {
+                    let t = await f.text();
+                    if (t.length > 300000) { t = t.slice(0, 300000); toast('warning', f.name + ' 太长，只发前 30 万字'); }
+                    S.pending.push({ type: 'file', name: f.name, text: t });
+                } else {
+                    toast('warning', f.name + '：只支持图片和文本类文件');
+                }
+            } catch (e) { toast('error', e.message || String(e), f.name); }
+        }
+        renderPending();
+    }
+
+    function renderPending() {
+        const bar = $('#attach-bar');
+        bar.innerHTML = S.pending.map((a, i) => a.type === 'image'
+            ? '<div class="att"><img src="' + esc(a.url) + '" alt=""><button class="att-x" data-rm="' + i + '" aria-label="移除">×</button></div>'
+            : '<div class="att file"><span>📄 ' + esc(a.name) + '</span><button class="att-x" data-rm="' + i + '" aria-label="移除">×</button></div>').join('');
+    }
+    $('#attach-bar').addEventListener('click', (e) => {
+        const b = e.target.closest('[data-rm]');
+        if (b) { S.pending.splice(+b.dataset.rm, 1); renderPending(); }
+    });
+    $('#btn-attach').addEventListener('click', async () => {
+        const files = await pickFiles('image/*,text/*,.txt,.md,.json,.csv,.log,.yaml,.yml,.xml,.html,.js,.py,.srt', true);
+        if (files.length) addAttachments(files);
+    });
+    // 粘贴图片
+    inputEl.addEventListener('paste', (e) => {
+        const fs = Array.from((e.clipboardData && e.clipboardData.files) || []);
+        if (fs.length) { e.preventDefault(); addAttachments(fs); }
+    });
+
     function setGenUI(on) {
         sendBtn.classList.toggle('stop', on);
         sendBtn.setAttribute('aria-label', on ? '停止' : '发送');
@@ -521,14 +597,21 @@
         if (!S.chat) S.chat = newChatObj();
         const text = inputEl.value;
         const c = S.chat;
-        if (!text.trim()) {
+        const atts = S.pending.slice();
+        if (!text.trim() && !atts.length) {
             // 空输入：最后一条是提问时直接让 AI 回复
             const last = c.messages[c.messages.length - 1];
             if (last && last.role === 'user') generate(null);
             return;
         }
-        c.messages.push({ id: uid(), role: 'user', content: text, time: Date.now() });
-        if (c.title === '新对话') c.title = text.trim().replace(/\s+/g, ' ').slice(0, 24) || '新对话';
+        const um = { id: uid(), role: 'user', content: text, time: Date.now() };
+        const imgs = atts.filter((a) => a.type === 'image').map((a) => a.url);
+        const files = atts.filter((a) => a.type === 'file').map((a) => ({ name: a.name, text: a.text }));
+        if (imgs.length) um.images = imgs;
+        if (files.length) um.files = files;
+        c.messages.push(um);
+        if (c.title === '新对话') c.title = (text.trim().replace(/\s+/g, ' ').slice(0, 24) || (atts[0] && atts[0].name) || '新对话');
+        S.pending = []; renderPending();
         inputEl.value = '';
         autoGrow();
         await saveChat(true);
@@ -544,7 +627,7 @@
         // target：要重新生成的那条 assistant；null 表示在最后追加新回复
         const msgs = S.chat.messages;
         const end = target ? msgs.indexOf(target) : msgs.length;
-        return msgs.slice(0, end).filter((m) => (m.content || '').trim() && !(m.role === 'assistant' && m.error && !m.content));
+        return msgs.slice(0, end).filter((m) => (m.content || '').trim() || (m.images && m.images.length) || (m.files && m.files.length));
     }
 
     function buildFor(target) {
@@ -552,7 +635,7 @@
         const vars = JSON.parse(JSON.stringify(c.vars || {}));
         const gvars = JSON.parse(JSON.stringify(S.settings.gvars || {}));
         const out = Preset.build({
-            preset: curPreset(), history: historyFor(target).map((m) => ({ role: m.role, content: m.content })),
+            preset: curPreset(), history: historyFor(target).map((m) => ({ role: m.role, content: m.content, images: m.images, files: m.files })),
             settings: S.settings, vars, gvars, model: curModel(),
         });
         out.vars = vars; out.gvars = gvars;
@@ -703,17 +786,19 @@
         const pend = inputEl.value.trim();
         if (pend) built = (function () {
             const c = S.chat;
-            const hist = historyFor(null).map((m) => ({ role: m.role, content: m.content })).concat([{ role: 'user', content: inputEl.value }]);
+            const hist = historyFor(null).map((m) => ({ role: m.role, content: m.content, images: m.images, files: m.files })).concat([{ role: 'user', content: inputEl.value, images: S.pending.filter((a) => a.type === 'image').map((a) => a.url), files: S.pending.filter((a) => a.type === 'file') }]);
             return Preset.build({ preset: curPreset(), history: hist, settings: S.settings, vars: JSON.parse(JSON.stringify(c.vars || {})), gvars: JSON.parse(JSON.stringify(S.settings.gvars || {})), model: curModel() });
         })();
-        const total = built.messages.reduce((a, m) => a + Preset.estTokens(m.content), 0);
+        const textOf = (c) => (Array.isArray(c) ? c.filter((x) => x.type === 'text').map((x) => x.text).join('\n') : c);
+        const imgsOf = (c) => (Array.isArray(c) ? c.filter((x) => x.type === 'image_url').length : 0);
+        const total = built.messages.reduce((a, m) => a + Preset.estTokens(textOf(m.content)), 0);
         const p = built.params;
         const L = openLayer('page', '<div class="page-head"><button class="icon-btn" data-close aria-label="返回">' + ICON.back + '</button><b>实际发送内容</b></div>'
             + '<div class="page-body"><div class="card-sub" style="margin-bottom:12px">' + built.messages.length + ' 条消息 · 约 ' + total + ' tokens（估算）'
             + ' · 温度 ' + p.temperature + ' · 最大回复 ' + p.max_tokens + (p.stream ? ' · 流式' : '') + (pend ? ' · 含输入框里还没发的内容' : '') + '</div>'
-            + built.messages.map((m) => '<div class="preview-msg"><div class="pm-role"><span>' + m.role + '</span><span>约 ' + Preset.estTokens(m.content) + '</span></div><pre>' + esc(m.content) + '</pre></div>').join('')
+            + built.messages.map((m) => '<div class="preview-msg"><div class="pm-role"><span>' + m.role + (imgsOf(m.content) ? ' · 图片 ' + imgsOf(m.content) + ' 张' : '') + '</span><span>约 ' + Preset.estTokens(textOf(m.content)) + '</span></div><pre>' + esc(textOf(m.content)) + '</pre></div>').join('')
             + '<div class="btns"><button class="btn" data-copy-json>复制 JSON</button></div></div>');
-        $('[data-copy-json]', L.box).onclick = () => copyText(JSON.stringify(built.messages, null, 2));
+        $('[data-copy-json]', L.box).onclick = () => copyText(JSON.stringify(built.messages, (k, v) => (k === 'url' && typeof v === 'string' && v.startsWith('data:') ? '[图片 base64 省略]' : v), 2));
     }
 
     // ------------------------------------------------------------
@@ -888,6 +973,15 @@
         const body = $('.page-body', L.box);
         const save = () => savePresets();
         const byId = () => new Map(p.prompts.map((x) => [x.identifier, x]));
+        const unusedHTML = () => {
+            const inOrder = new Set(p.order.map((o) => o.identifier));
+            const un = p.prompts.filter((x) => !inOrder.has(x.identifier));
+            if (!un.length) return '';
+            return '<details style="margin-top:18px"><summary class="section-title" style="cursor:pointer;margin:0">没在顺序里的条目（' + un.length + ' 个，酒馆里也看不到、不会发送）</summary>'
+                + un.map((x) => '<div class="entry off"><div class="e-main"><div class="e-name">' + esc(x.name) + '</div><div class="e-tags"><span class="badge">' + x.role + '</span><span class="badge">约 ' + Preset.estTokens(x.content) + '</span></div></div>'
+                    + '<button class="btn small" data-add-unused="' + esc(x.identifier) + '">加入末尾</button></div>').join('')
+                + '</details>';
+        };
         const draw = () => {
             const pr = p.params;
             const map = byId();
@@ -910,13 +1004,13 @@
                         if (x.injection_position === 1) tags.push('<span class="badge acc">深度 ' + x.injection_depth + '</span>');
                         tags.push('<span class="badge">约 ' + Preset.estTokens(x.content) + '</span>');
                     }
-                    if (o.orphan) tags.push('<span class="badge">原预设未排序</span>');
                     return '<div class="entry' + (o.enabled ? '' : ' off') + (x.marker ? ' marker' : '') + '" data-i="' + i + '">'
                         + '<label class="switch"><input type="checkbox" data-toggle' + (o.enabled ? ' checked' : '') + '><span></span></label>'
                         + '<div class="e-main" data-open><div class="e-name">' + esc(x.name) + '</div><div class="e-tags">' + tags.join('') + '</div></div>'
                         + '<button class="icon-btn" data-up aria-label="上移">' + ICON.up + '</button><button class="icon-btn" data-down aria-label="下移">' + ICON.down + '</button></div>';
                 }).join('')
                 + '<div class="btns" style="justify-content:flex-start"><button class="btn small" data-new-entry>' + '新增条目</button></div>'
+                + unusedHTML()
                 + '<div class="section-title">其他</div>'
                 + '<div class="field"><label>新对话开头提示（new_chat_prompt）</label><textarea class="ta" data-s="new_chat_prompt"></textarea></div>'
                 + '<div class="field"><label>AI 回复预填（assistant_prefill，给 Claude 用）</label><textarea class="ta" data-s="assistant_prefill"></textarea></div>';
@@ -945,7 +1039,9 @@
                 save(); draw(); editEntry(p, x, draw);
                 return;
             }
-            if (!row) return;
+            const addU = e.target.closest('[data-add-unused]');
+            if (addU) { p.order.push({ identifier: addU.dataset.addUnused, enabled: true }); save(); draw(); return; }
+            if (!row || row.dataset.i === undefined) return;
             const i = +row.dataset.i;
             if (e.target.closest('[data-up]') && i > 0) { [p.order[i - 1], p.order[i]] = [p.order[i], p.order[i - 1]]; save(); draw(); }
             else if (e.target.closest('[data-down]') && i < p.order.length - 1) { [p.order[i + 1], p.order[i]] = [p.order[i], p.order[i + 1]]; save(); draw(); }
@@ -1039,16 +1135,16 @@
     function tabData(body) {
         let ver = '网页调试版';
         try { if (bridge) ver = bridge.appVersion(); } catch (e) { /* ignore */ }
-        body.innerHTML = '<div class="card"><div class="card-title">备份</div><div class="card-sub">把全部对话、预设、接口（含 Key）、设置导出成一个 JSON 文件，保存在「下载/酒馆询问机」。换手机或重装前先备份。</div>'
+        body.innerHTML = '<div class="card"><div class="card-title">备份</div><div class="card-sub">把全部对话、预设、接口（含 Key）、设置导出成一个 JSON 文件，保存在「下载/自制AI问答机」。换手机或重装前先备份。</div>'
             + '<div class="btns"><button class="btn primary small" data-export>导出备份</button><button class="btn small" data-import>导入备份</button></div></div>'
             + '<div class="card"><div class="card-title">统计</div><div class="card-sub">' + S.chatIndex.length + ' 个对话 · ' + S.presets.length + ' 个预设 · ' + S.apis.length + ' 个接口</div></div>'
             + '<div class="card"><div class="card-title">清空</div><div class="card-sub">删除全部对话（预设和接口保留）。</div><div class="btns"><button class="btn small danger" data-clear>清空全部对话</button></div></div>'
-            + '<div class="card-sub" style="text-align:center;margin-top:20px">酒馆询问机 ' + esc(ver) + '</div>';
+            + '<div class="card-sub" style="text-align:center;margin-top:20px">自制AI问答机 ' + esc(ver) + '</div>';
         $('[data-export]', body).onclick = async () => {
             await saveChat(true);
             const all = await Store.dumpAll();
             const d = new Date();
-            const name = '酒馆询问机备份-' + d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0') + '-' + String(d.getHours()).padStart(2, '0') + String(d.getMinutes()).padStart(2, '0') + '.json';
+            const name = '自制AI问答机备份-' + d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0') + '-' + String(d.getHours()).padStart(2, '0') + String(d.getMinutes()).padStart(2, '0') + '.json';
             saveFile(name, JSON.stringify({ app: 'tavern-asker', version: 1, time: Date.now(), data: all }));
         };
         $('[data-import]', body).onclick = async () => {
@@ -1056,7 +1152,7 @@
             if (!f) return;
             let j;
             try { j = JSON.parse(await f.text()); } catch (e) { return toast('error', '不是有效的 JSON'); }
-            if (!j || j.app !== 'tavern-asker' || !j.data) return toast('error', '不是酒馆询问机的备份文件');
+            if (!j || j.app !== 'tavern-asker' || !j.data) return toast('error', '不是自制AI问答机的备份文件');
             const L = openLayer('dialog', '<h3>导入备份</h3><p>合并：保留现有数据，同名项用备份里的覆盖。\n替换：先清空，再完全用备份。</p>'
                 + '<div class="btns"><button class="btn" data-close>取消</button><button class="btn" data-merge>合并</button><button class="btn danger" data-replace>替换</button></div>');
             const go = async (merge) => {
@@ -1117,6 +1213,10 @@
         S.settings.plainParams = Object.assign({}, DEFAULT_SETTINGS.plainParams, S.settings.plainParams || {});
         S.apis = await Store.get('apis', []);
         S.presets = await Store.get('presets', []);
+        // 旧版本把「没在顺序里的条目」追加到了末尾，这里清掉
+        let fixed = false;
+        S.presets.forEach((p) => { const n = p.order.length; p.order = p.order.filter((o) => !o.orphan); if (p.order.length !== n) fixed = true; });
+        if (fixed) savePresets();
         S.chatIndex = await Store.get('chatIndex', []);
         applyFont();
         const last = S.settings.lastChatId && S.chatIndex.find((x) => x.id === S.settings.lastChatId);

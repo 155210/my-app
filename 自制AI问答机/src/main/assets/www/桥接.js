@@ -2,7 +2,7 @@
  * 桥接.js —— 安卓外壳与网页之间的桥（从「自制ai工具箱」的 app-bridge.js 精简而来）
  *
  *  1. fetch 转发：跨域请求交给原生层发，绕开 CORS / 允许 http 地址，流式数据逐块回传
- *  2. 文件保存：window.__saveBlob(blob, 文件名) 写进 下载/酒馆询问机/
+ *  2. 文件保存：window.__saveBlob(blob, 文件名) 写进 下载/自制AI问答机/
  *  3. 剪贴板：navigator.clipboard.writeText 走原生
  *  4. 轻提示：window.__toast(类型, 内容, 标题)
  *  返回键由 界面.js 里的 window.__appBack 处理。

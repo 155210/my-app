@@ -1,23 +1,23 @@
-# 酒馆询问机（独立 App）
+# 自制AI问答机（独立 App）
 
 酒馆外的「纯净提问窗口」：不带酒馆聊天记录、不带世界书、不跑正则，可以导入酒馆预设，自定义 API，随时换模型问。
 
 ## 下载 / 更新
 
-推送到 `main` 且改动了 `酒馆询问机/**` 时，Actions（`.github/workflows/酒馆询问机.yml`）自动打包，
-发到仓库 **Releases**，标签 `asker-<构建号>`，附件显示为「酒馆询问机.apk」（GitHub 附件文件名不支持中文，实际文件名 TavernAsker.apk）。签名固定（`酒馆询问机.keystore`，密码 asker123），新版直接覆盖安装，数据保留。
+推送到 `main` 且改动了 `自制AI问答机/**` 时，Actions（`.github/workflows/自制AI问答机.yml`）自动打包，
+发到仓库 **Releases**，标签 `asker-<构建号>`，附件显示为「自制AI问答机.apk」（GitHub 附件文件名不支持中文，实际文件名 AiAsker.apk）。签名固定（`自制AI问答机.keystore`，密码 asker123），新版直接覆盖安装，数据保留。
 
 ## 结构
 
 ```
-酒馆询问机/
+自制AI问答机/
 ├── build.gradle                包名 com.example.tavernasker（包名/Java 类名只能用英文），版本号 = Actions 构建号
-├── 酒馆询问机.keystore
+├── 自制AI问答机.keystore
 └── src/main/
     ├── java/com/example/tavernasker/
     │   ├── MainActivity.java     WebView 外壳，加载 assets/www/首页.html，JS 桥 AndroidBridge
     │   ├── NativeHttp.java       请求代发（无跨域限制、支持 http、流式逐块回传）
-    │   ├── FileSaver.java        备份/导出写入 下载/酒馆询问机/
+    │   ├── FileSaver.java        备份/导出写入 下载/自制AI问答机/
     │   └── KeepAliveService.java 只在生成回复期间开的前台服务，切后台不断流
     └── assets/www/
         ├── 首页.html             页面骨架
@@ -37,7 +37,13 @@
 - `injection_position = 1` 的条目按深度插进对话
 - `new_chat_prompt` 放在对话最前，`assistant_prefill` 作为最后一条 assistant
 - 之后按「通用 → 消息整理」合并同角色 / 严格模式
+- 预设里有、但 prompt_order 里没有的条目（酒馆条目列表里也看不到）不放进顺序，编辑页底下单独列出
 - 不执行正则，也不执行酒馆助手 EJS 模板
+
+## 附件
+
+输入框左边的回形针：图片压到最长边 1600 的 JPEG，按 OpenAI 多模态格式（content 数组 + image_url 的 base64）发；
+文本类文件（txt/md/json/代码等）把内容拼进正文。
 
 ## 本地调试
 

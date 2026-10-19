@@ -67,9 +67,8 @@
         } else {
             order = prompts.map((p) => ({ identifier: p.identifier, enabled: raw.prompts.find((x) => x.identifier === p.identifier).enabled !== false }));
         }
-        // 预设里有、但顺序表里没有的条目：放到最后、默认关闭（酒馆里同样不会发送）
-        const inOrder = new Set(order.map((o) => o.identifier));
-        prompts.forEach((p) => { if (!inOrder.has(p.identifier)) order.push({ identifier: p.identifier, enabled: false, orphan: true }); });
+        // 预设里有、但顺序表里没有的条目（酒馆的条目列表里也看不到、不会发送）不放进顺序，
+        // 编辑页底下单独列出，需要的话可以手动加入
 
         const params = {
             temperature: num(raw.temperature, 1),
@@ -283,22 +282,24 @@
     }
 
     function postProcess(msgs, mode) {
-        let out = msgs.filter((m) => m && typeof m.content === 'string' && m.content.trim() !== '');
+        let out = msgs.filter((m) => m && typeof m.content === 'string' && (m.content.trim() !== '' || (m.images && m.images.length)));
         if (mode === 'none') return out;
         if (mode === 'strict' || mode === 'semi') {
             // 只保留开头连续的 system，后面的 system 改成 user
             let head = true;
             out = out.map((m) => {
                 if (m.role !== 'system') head = false;
-                return (!head && m.role === 'system') ? { role: 'user', content: m.content } : m;
+                return (!head && m.role === 'system') ? { role: 'user', content: m.content, images: m.images } : m;
             });
         }
         // 合并相邻同角色
         const merged = [];
         out.forEach((m) => {
             const last = merged[merged.length - 1];
-            if (last && last.role === m.role) last.content += '\n\n' + m.content;
-            else merged.push({ role: m.role, content: m.content });
+            if (last && last.role === m.role) {
+                last.content = [last.content, m.content].filter((x) => x.trim()).join('\n\n');
+                if (m.images && m.images.length) last.images = (last.images || []).concat(m.images);
+            } else merged.push({ role: m.role, content: m.content, images: m.images && m.images.length ? m.images.slice() : undefined });
         });
         if (mode === 'strict') {
             // system 之后第一条必须是 user
@@ -356,7 +357,13 @@
             prefill = M(preset.assistant_prefill || '');
         }
 
-        let history = hist.map((m) => ({ role: m.role, content: m.role === 'user' ? M(m.content) : m.content }));
+        // 附件：文本文件拼进正文，图片单独带着，最后转成 OpenAI 多模态格式
+        const filesText = (files) => (files || []).map((f) => '\n\n【附件：' + f.name + '】\n```\n' + f.text + '\n```').join('');
+        let history = hist.map((m) => ({
+            role: m.role,
+            content: (m.role === 'user' ? M(m.content || '') : (m.content || '')) + filesText(m.files),
+            images: m.images && m.images.length ? m.images.slice() : undefined,
+        }));
         // 预设里关掉/没有「聊天记录」时，对话仍然附在所有条目之后，不然问题发不出去
 
         // 上下文长度：超了就从最早的对话开始丢
@@ -378,6 +385,13 @@
         let messages = [...before, ...history, ...after];
         messages = postProcess(messages, st.postProcess || 'merge');
         if (prefill) messages.push({ role: 'assistant', content: prefill });
+        messages = messages.map((m) => {
+            if (!m.images || !m.images.length) return { role: m.role, content: m.content };
+            const parts = [];
+            if (m.content.trim()) parts.push({ type: 'text', text: m.content });
+            m.images.forEach((url) => parts.push({ type: 'image_url', image_url: { url } }));
+            return { role: m.role, content: parts };
+        });
         return { messages, params, dropped, prefill };
     }
 

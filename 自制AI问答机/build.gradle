@@ -20,7 +20,7 @@ android {
     // 固定签名：新版可直接覆盖安装，聊天记录、预设、API 设置都保留
     signingConfigs {
         fixed {
-            storeFile file('酒馆询问机.keystore')
+            storeFile file('自制AI问答机.keystore')
             storePassword 'asker123'
             keyAlias 'asker'
             keyPassword 'asker123'

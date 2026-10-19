@@ -20,9 +20,9 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
-/** 把网页导出的文件分块写进 下载/酒馆询问机/ */
+/** 把网页导出的文件分块写进 下载/自制AI问答机/ */
 class FileSaver {
-    static final String FOLDER = "酒馆询问机";
+    static final String FOLDER = "自制AI问答机";
 
     private final Context ctx;
     private final Map<String, Job> jobs = new ConcurrentHashMap<>();

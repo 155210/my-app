@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
     <meta name="color-scheme" content="dark">
-    <title>酒馆询问机</title>
+    <title>自制AI问答机</title>
     <link rel="stylesheet" href="样式.css">
 </head>
 <body>
@@ -25,7 +25,11 @@
 
         <main id="msgs"></main>
 
+        <div id="attach-bar"></div>
         <footer id="composer">
+            <button id="btn-attach" class="attach-btn" aria-label="发图片或文件">
+                <svg viewBox="0 0 24 24"><path d="M21 11.5l-8.6 8.6a5 5 0 0 1-7-7l8.6-8.6a3.3 3.3 0 0 1 4.7 4.7l-8.6 8.6a1.7 1.7 0 0 1-2.4-2.4l8-8"/></svg>
+            </button>
             <textarea id="input" rows="1" placeholder="问点什么…"></textarea>
             <button id="btn-send" class="send-btn" aria-label="发送">
                 <svg class="i-send" viewBox="0 0 24 24"><path d="M5 12h13M13 6l6 6-6 6"/></svg>

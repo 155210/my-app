@@ -30,7 +30,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 /**
- * 外壳：一个全屏 WebView，加载 assets/www/首页.html（酒馆询问机的网页界面）。
+ * 外壳：一个全屏 WebView，加载 assets/www/首页.html（自制AI问答机的网页界面）。
  * 网页通过 window.AndroidBridge 调原生能力：网络转发、保存文件、剪贴板。
  */
 public class MainActivity extends Activity {
@@ -211,9 +211,6 @@ public class MainActivity extends Activity {
             runOnUiThread(() -> {
                 ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
                 if (cm != null) cm.setPrimaryClip(ClipData.newPlainText("text", text));
-                if (Build.VERSION.SDK_INT < 33) {
-                    Toast.makeText(MainActivity.this, "已复制", Toast.LENGTH_SHORT).show();
-                }
             });
         }
 
