@@ -36,19 +36,29 @@ jobs:
       - name: 打包 酒馆询问机 APK
         run: gradle :酒馆询问机:assembleRelease --no-daemon
 
+      # GitHub 会把 Release 附件名里的中文删掉（变成 default.apk），所以文件名用英文，
+      # 发布后再把显示名（label）设成「酒馆询问机.apk」
       - name: 改名
-        run: cp 酒馆询问机/build/outputs/apk/release/*.apk 酒馆询问机.apk
+        run: cp 酒馆询问机/build/outputs/apk/release/*.apk TavernAsker.apk
 
       - uses: actions/upload-artifact@v4
         with:
           name: 酒馆询问机
-          path: 酒馆询问机.apk
+          path: TavernAsker.apk
 
       # 发布到 Releases：手机浏览器打开仓库 Releases 页面就能直接下载 APK
       - name: 发布
+        id: rel
         uses: softprops/action-gh-release@v2
         with:
           tag_name: asker-${{ github.run_number }}
           name: 酒馆询问机 build ${{ github.run_number }}
           make_latest: true
-          files: 酒馆询问机.apk
+          files: TavernAsker.apk
+
+      - name: 附件显示中文名
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          id=$(gh api repos/${{ github.repository }}/releases/tags/asker-${{ github.run_number }} --jq '.assets[] | select(.name=="TavernAsker.apk") | .id')
+          gh api -X PATCH repos/${{ github.repository }}/releases/assets/$id -f label='酒馆询问机.apk' >/dev/null
