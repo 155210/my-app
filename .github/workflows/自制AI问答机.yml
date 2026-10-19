@@ -51,7 +51,7 @@ jobs:
         id: rel
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: asker-${{ github.run_number }}
+          tag_name: wenda-${{ github.run_number }}
           name: 自制AI问答机 build ${{ github.run_number }}
           make_latest: true
           files: AiAsker.apk
@@ -60,5 +60,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          id=$(gh api repos/${{ github.repository }}/releases/tags/asker-${{ github.run_number }} --jq '.assets[] | select(.name=="AiAsker.apk") | .id')
+          id=$(gh api repos/${{ github.repository }}/releases/tags/wenda-${{ github.run_number }} --jq '.assets[] | select(.name=="AiAsker.apk") | .id')
           gh api -X PATCH repos/${{ github.repository }}/releases/assets/$id -f label='自制AI问答机.apk' >/dev/null

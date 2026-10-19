@@ -2,8 +2,8 @@ plugins {
     id 'com.android.application'
 }
 
-// 每次 Actions 构建自动递增版本号（本地构建为 1）
-def runNumber = (System.getenv('GITHUB_RUN_NUMBER') ?: '1').toInteger()
+// 每次 Actions 构建自动递增版本号。+10：改名前的旧工作流已经发过 2 个版本，保证新版号比旧版大、能覆盖安装
+def runNumber = (System.getenv('GITHUB_RUN_NUMBER') ?: '1').toInteger() + 10
 
 android {
     namespace 'com.example.tavernasker'

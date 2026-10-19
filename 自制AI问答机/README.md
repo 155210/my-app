@@ -5,7 +5,7 @@
 ## 下载 / 更新
 
 推送到 `main` 且改动了 `自制AI问答机/**` 时，Actions（`.github/workflows/自制AI问答机.yml`）自动打包，
-发到仓库 **Releases**，标签 `asker-<构建号>`，附件显示为「自制AI问答机.apk」（GitHub 附件文件名不支持中文，实际文件名 AiAsker.apk）。签名固定（`自制AI问答机.keystore`，密码 asker123），新版直接覆盖安装，数据保留。
+发到仓库 **Releases**，标签 `wenda-<构建号>`，附件显示为「自制AI问答机.apk」（GitHub 附件文件名不支持中文，实际文件名 AiAsker.apk）。签名固定（`自制AI问答机.keystore`，密码 asker123），新版直接覆盖安装，数据保留。
 
 ## 结构
 
