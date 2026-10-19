@@ -1,0 +1,49 @@
+plugins {
+    id 'com.android.application'
+}
+
+// 每次 Actions 构建自动递增版本号（本地构建为 1）
+def runNumber = (System.getenv('GITHUB_RUN_NUMBER') ?: '1').toInteger()
+
+android {
+    namespace 'com.example.tavernasker'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.example.tavernasker'
+        minSdk 26
+        targetSdk 34
+        versionCode runNumber
+        versionName "1.0.${runNumber}"
+    }
+
+    // 固定签名：新版可直接覆盖安装，聊天记录、预设、API 设置都保留
+    signingConfigs {
+        fixed {
+            storeFile file('酒馆询问机.keystore')
+            storePassword 'asker123'
+            keyAlias 'asker'
+            keyPassword 'asker123'
+        }
+    }
+
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.fixed
+        }
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.fixed
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+        encoding 'UTF-8'
+    }
+}
+
+dependencies {
+    implementation 'androidx.webkit:webkit:1.11.0'
+}

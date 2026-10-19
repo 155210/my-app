@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 108x108 自适应图标前景：对话气泡 + 问号 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- 气泡 -->
+    <path android:fillColor="#FFE2A65B"
+        android:pathData="M34,32 L74,32 C78.4,32 82,35.6 82,40 L82,64 C82,68.4 78.4,72 74,72 L50,72 L38,82 L40,72 L34,72 C29.6,72 26,68.4 26,64 L26,40 C26,35.6 29.6,32 34,32 Z" />
+    <!-- 问号 -->
+    <path android:strokeColor="#FF1E2128" android:strokeWidth="5" android:strokeLineCap="round" android:strokeLineJoin="round"
+        android:fillColor="#00000000"
+        android:pathData="M47,46 C47,41.5 50.5,39 54,39 C57.5,39 61,41.5 61,45.5 C61,50 54,51 54,56.5" />
+    <path android:fillColor="#FF1E2128"
+        android:pathData="M54,62 m-3.2,0 a3.2,3.2 0 1,0 6.4,0 a3.2,3.2 0 1,0 -6.4,0" />
+</vector>
