@@ -93,7 +93,7 @@
     const DEFAULT_SETTINGS = {
         userName: 'User', charName: 'Assistant', postProcess: 'merge', plainSystemPrompt: '',
         plainParams: { temperature: 1, max_tokens: 4096, stream: true },
-        enterToSend: false, fontSize: 15, thinkOpen: false,
+        enterToSend: false, fontSize: 15, thinkOpen: false, keepLast: 0,
         lastApiId: '', lastModel: '', lastPresetId: '', gvars: {},
     };
     const S = {
@@ -333,6 +333,7 @@
         }
         const top = msgsEl.scrollTop;
         msgsEl.innerHTML = c.messages.map(msgHTML).join('');
+        markCutoff();
         if (keepScroll) msgsEl.scrollTop = top; else toBottom();
     }
 
@@ -623,11 +624,53 @@
         if (S.gen && S.gen.ctrl) S.gen.ctrl.abort();
     }
 
-    function historyFor(target) {
+    // 只发最近 N 层：对话里设了就用对话的，没设跟随通用设置；0 = 全部发送
+    function keepLast() {
+        const c = S.chat;
+        const v = c && c.keepLast !== undefined && c.keepLast !== null && c.keepLast !== '' ? c.keepLast : S.settings.keepLast;
+        return Math.max(0, parseInt(v, 10) || 0);
+    }
+    const sendable = (m) => (m.content || '').trim() || (m.images && m.images.length) || (m.files && m.files.length);
+
+    function historyFor(target, reserve) {
         // target：要重新生成的那条 assistant；null 表示在最后追加新回复
+        // reserve：后面还要再接几条（预览时输入框里没发的那条）
         const msgs = S.chat.messages;
         const end = target ? msgs.indexOf(target) : msgs.length;
-        return msgs.slice(0, end).filter((m) => (m.content || '').trim() || (m.images && m.images.length) || (m.files && m.files.length));
+        const list = msgs.slice(0, end).filter(sendable);
+        const k = keepLast();
+        if (k > 0) {
+            const n = k - (reserve || 0);
+            return n > 0 ? list.slice(-n) : [];
+        }
+        return list;
+    }
+
+    /** 在对话里标出「以上不发送」的分界线 */
+    function markCutoff() {
+        const c = S.chat;
+        $$('.cut-line', msgsEl).forEach((x) => x.remove());
+        $$('.msg.unsent', msgsEl).forEach((x) => x.classList.remove('unsent'));
+        const k = keepLast();
+        if (!c || !k) return;
+        const list = c.messages.filter(sendable);
+        const last = c.messages[c.messages.length - 1];
+        // 最后一条是回复时，下次还会多一条提问，所以现有的只发 k-1 条
+        const n = k - (last && last.role === 'user' ? 0 : 1);
+        if (list.length <= n) return;
+        const first = n > 0 ? list[list.length - n] : null;
+        let hidden = 0;
+        for (const m of c.messages) {
+            if (m === first) break;
+            const el = $('.msg[data-id="' + m.id + '"]', msgsEl);
+            if (el) el.classList.add('unsent');
+            if (sendable(m)) hidden++;
+        }
+        const line = document.createElement('div');
+        line.className = 'cut-line';
+        line.textContent = '以上 ' + hidden + ' 条不发给 AI（只发最近 ' + k + ' 层）';
+        const fe = first && $('.msg[data-id="' + first.id + '"]', msgsEl);
+        if (fe) msgsEl.insertBefore(line, fe); else msgsEl.appendChild(line);
     }
 
     function buildFor(target) {
@@ -703,7 +746,7 @@
             S.gen = null;
             setGenUI(false);
             try { bridge && bridge.keepAlive && bridge.keepAlive(false); } catch (e) { /* ignore */ }
-            if (S.chat === c) renderOne(m, false);
+            if (S.chat === c) { renderOne(m, false); markCutoff(); }
             await saveChat(true);
             saveSettings();
         }
@@ -723,6 +766,8 @@
             + '<div class="field"><label>模型</label><div class="row"><input type="text" class="grow" data-model list="model-list" placeholder="模型名">'
             + '<button class="btn small" data-fetch>拉取列表</button></div><datalist id="model-list"></datalist>'
             + '<div class="model-picks" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px"></div></div>'
+            + '<div class="field"><label>只发最近几层</label><input type="number" inputmode="numeric" min="0" step="1" data-keep placeholder="留空跟随通用设置（现在是 ' + (parseInt(S.settings.keepLast, 10) ? S.settings.keepLast + ' 层' : '全部') + '）">'
+            + '<div class="help">0 = 全部发送。更早的消息留在界面上，但不发给 AI。</div></div>'
             + '<div class="field"><label>预设</label><div class="row"><select class="grow" data-preset><option value="">不使用预设（纯净）</option>'
             + S.presets.map((p) => '<option value="' + p.id + '"' + (c.presetId === p.id ? ' selected' : '') + '>' + esc(p.name) + '</option>').join('')
             + '</select><button class="btn small" data-manage-preset>管理</button></div>'
@@ -746,6 +791,9 @@
             c.apiId = a ? a.id : '';
             c.model = inpModel.value.trim();
             c.presetId = selPreset.value;
+            const kv = $('[data-keep]', L.box).value.trim();
+            if (kv === '') delete c.keepLast; else c.keepLast = Math.max(0, parseInt(kv, 10) || 0);
+            markCutoff();
             S.settings.lastApiId = c.apiId; S.settings.lastModel = c.model; S.settings.lastPresetId = c.presetId;
             if (a && c.model) {
                 a.recent = [c.model].concat((a.recent || []).filter((x) => x !== c.model)).slice(0, 8);
@@ -759,6 +807,8 @@
         inpModel.onchange = apply;
         inpModel.oninput = () => { c.model = inpModel.value.trim(); renderChip(); };
         selPreset.onchange = apply;
+        $('[data-keep]', L.box).value = c.keepLast !== undefined && c.keepLast !== null ? c.keepLast : '';
+        $('[data-keep]', L.box).onchange = apply;
         picks.onclick = (e) => { const b = e.target.closest('[data-pick]'); if (b) { inpModel.value = b.dataset.pick; apply(); } };
         $('[data-fetch]', L.box).onclick = async (e) => {
             const a = apiById(selApi.value);
@@ -786,7 +836,7 @@
         const pend = inputEl.value.trim();
         if (pend) built = (function () {
             const c = S.chat;
-            const hist = historyFor(null).map((m) => ({ role: m.role, content: m.content, images: m.images, files: m.files })).concat([{ role: 'user', content: inputEl.value, images: S.pending.filter((a) => a.type === 'image').map((a) => a.url), files: S.pending.filter((a) => a.type === 'file') }]);
+            const hist = historyFor(null, 1).map((m) => ({ role: m.role, content: m.content, images: m.images, files: m.files })).concat([{ role: 'user', content: inputEl.value, images: S.pending.filter((a) => a.type === 'image').map((a) => a.url), files: S.pending.filter((a) => a.type === 'file') }]);
             return Preset.build({ preset: curPreset(), history: hist, settings: S.settings, vars: JSON.parse(JSON.stringify(c.vars || {})), gvars: JSON.parse(JSON.stringify(S.settings.gvars || {})), model: curModel() });
         })();
         const textOf = (c) => (Array.isArray(c) ? c.filter((x) => x.type === 'text').map((x) => x.text).join('\n') : c);
@@ -1105,6 +1155,9 @@
             + '<div class="field"><label>系统提示词（可留空）</label><textarea class="ta" data-g="plainSystemPrompt" placeholder="比如：你是一个简洁的助手，用中文回答。"></textarea></div>'
             + '<div class="grid2">' + numFieldG('温度', 'temperature', pp.temperature, 0.05) + numFieldG('最大回复长度', 'max_tokens', pp.max_tokens, 1) + '</div>'
             + '<label class="check"><input type="checkbox" data-pp="stream"' + (pp.stream ? ' checked' : '') + '> 流式输出</label>'
+            + '<div class="section-title">省 token</div>'
+            + '<div class="field"><label>只发最近几层（0 = 全部发送）</label><input type="number" inputmode="numeric" min="0" step="1" data-g="keepLast">'
+            + '<div class="help">一条提问或一条回复算一层，更早的不发给 AI，对话里会画一条分界线。每个对话也可以在右上角切换处单独设。</div></div>'
             + '<div class="section-title">界面</div>'
             + '<label class="check"><input type="checkbox" data-g="enterToSend"> 回车直接发送（关掉时回车是换行，点按钮发送）</label>'
             + '<label class="check"><input type="checkbox" data-g="thinkOpen"> 思考过程默认展开</label>'

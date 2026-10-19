@@ -148,6 +148,13 @@ details.think .think-body { white-space: pre-wrap; margin-top: 4px; max-height: 
 .send-btn.stop .i-send { display: none; }
 .send-btn.stop .i-stop { display: block; }
 
+/* 只发最近 N 层 */
+.msg.unsent { opacity: .45; }
+.cut-line {
+    display: flex; align-items: center; gap: 10px; margin: 4px 0 18px; font-size: 12px; color: var(--accent);
+}
+.cut-line::before, .cut-line::after { content: ''; flex: 1; border-top: 1px dashed rgba(226, 166, 91, .5); }
+
 /* 附件 */
 .attach-btn {
     flex: none; width: 40px; height: 42px; border: 1px solid var(--line); border-radius: 14px; background: var(--bg2); color: var(--dim);
