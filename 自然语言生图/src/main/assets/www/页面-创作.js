@@ -263,7 +263,8 @@
         urls = list.map((x) => x.url);
         box.innerHTML = list.map((x, i) => '<div class="card result" data-i="' + i + '"><img src="' + x.url + '" alt="">'
             + '<div class="acts"><button data-a="view">' + UI.ICON.reuse + '看配方</button><button data-a="again">' + UI.ICON.regen + '重绘</button>'
-            + '<button data-a="save">' + UI.ICON.save + '存到相册</button></div></div>').join('');
+            + '<button data-a="save">' + UI.ICON.save + '存到相册</button>'
+            + '<button data-a="del" class="danger">' + UI.ICON.del + '删除</button></div></div>').join('');
         UI.$$('.result', box).forEach((card) => {
             const item = list[Number(card.dataset.i)].item;
             $('img', card).onclick = () => GalleryPage.openViewer(item.id);
@@ -273,6 +274,15 @@
                 if (b.dataset.a === 'again') CreatePage.redraw(item);
                 if (b.dataset.a === 'save') {
                     try { toast('success', await Gallery.saveToPhone(item), '已保存'); } catch (err) { toast('error', err.message, '保存失败'); }
+                }
+                if (b.dataset.a === 'del') {
+                    // 和图库里删一样：确认后连图库里的这张一起删
+                    if (!await UI.confirmBox('删除这张图？', '图库里的这张也会一起删掉。已经存到手机相册的不受影响。', '删除', true)) return;
+                    await Gallery.remove(item.id);
+                    results = results.filter((x) => x.id !== item.id);
+                    showResult();
+                    if (window.GalleryPage) GalleryPage.refresh();
+                    toast('success', '删掉了');
                 }
             };
         });
@@ -305,6 +315,12 @@
         fill();
         Queue.onChange(refresh);
     }
+
+    setTimeout(() => {
+        if (!window.Help || !Help.add) return;
+        Help.add({ id: 'create.del', group: '创作页', title: '删除刚出的图', target: '.result [data-a="del"]', tip: '不满意的图在这里直接删',
+            text: '出好的图下面有「删除」，确认后这张图连同图库里的一起删掉，不用再去图库找。已经存到手机相册的不受影响。不花 Anlas。' });
+    });
 
     window.CreatePage = { init, refresh, reuse, draw, redraw, get draft() { return draft; }, get busy() { return !!writing; } };
 })();

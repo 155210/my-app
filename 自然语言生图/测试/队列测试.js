@@ -163,6 +163,18 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await idle();
   ok(await count() === b4 + 1 && seeds[0] !== 555, '「重绘」再出一张，种子换了（' + seeds[0] + '）');
   await page.screenshot({ path: OUT + '/队列-创作.png', fullPage: true });
+  // 创作页删除：确认后图库里也删掉
+  const nRes = (await page.$$('#c-result .result')).length;
+  const firstId = await page.evaluate(async () => (await Gallery.list())[0].id);
+  const b5 = await count();
+  await page.click('#c-result .result [data-a="del"]');
+  await page.click('.dialog [data-no]');
+  ok(await count() === b5, '创作页删除先要确认，点取消不删');
+  await page.click('#c-result .result [data-a="del"]');
+  await page.click('.dialog [data-yes]');
+  await page.waitForFunction((n) => document.querySelectorAll('#c-result .result').length === n - 1, nRes, { timeout: 3000 }).catch(() => {});
+  ok((await page.$$('#c-result .result')).length === nRes - 1 && await count() === b5 - 1, '创作页删除：卡片没了，图库里也少一张');
+  ok(!await page.evaluate(async (id) => (await Gallery.list()).some((x) => x.id === id), firstId), '删的是最新出的那张');
 
   await browser.close(); srv.close();
   console.log(fails.length ? '\n失败 ' + fails.length + ' 项：\n' + fails.join('\n') : '\n全部通过');
