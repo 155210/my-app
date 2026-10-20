@@ -397,5 +397,12 @@
         if (nai().model !== lastModel) { lastModel = nai().model; render(); }
     };
 
+    setTimeout(() => {
+        if (!window.Help || !Help.add) return;
+        Help.add({ id: 'vibes', group: '多角色与参考图', title: '画风参考图（Vibe）', target: '#c-vibes', tip: '让出图模仿一张图的画风',
+            anlas: '每张图第一次在某个模型上用要编码一次，扣 2 Anlas；同时开超过 4 张，第 5 张起每张每次 +2',
+            text: '加一张图（手机里的、App 图库里的，或官网导出的 .naiv4vibe）。强度越大越像；信息提取量越大带过来的细节越多，只想要画风就调低。V5 官方不支持，开着角色参考时也会暂停。' });
+    });
+
     window.Vibes = { modelKey, prepare, cost, fromVibeFile, addFile, exportVibe, load, render };
 })();

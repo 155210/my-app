@@ -348,5 +348,16 @@
         });
     }
 
+    // 帮助说明（帮助模块在别的文件里，等所有脚本加载完再登记）
+    setTimeout(() => {
+        if (!window.Help || !Help.add) return;
+        Help.add({ id: 'chars', group: '多角色与参考图', title: '多角色', target: '#c-chars', tip: '每个角色单独写外貌和负面词',
+            text: '点「加一个角色」，每个角色有自己的正面词和负面词。上面的正面提示词写场景和人数（如 2girls），角色格子里只写这个人。V3 不支持。' });
+        Help.add({ id: 'chars-place', group: '多角色与参考图', title: '自己摆位置', target: '#c-chars', tip: '拖圆点决定角色站哪',
+            text: '打开「自己摆位置」后拖动带编号的圆点。V5 可以放在任意位置；V4 / V4.5 只认 5×5 的格子，松手会吸到最近的格子。关掉就让模型自己安排。' });
+        Help.add({ id: 'chars-acts', group: '多角色与参考图', title: '角色互动', target: '#c-chars', tip: '谁对谁做什么',
+            text: '有两个以上角色时可以加互动，比如「角色 1 拥抱 角色 2」。勾「互相」表示两人一起做（牵手、对视）。常用动作有中文可选，也可以自己写英文动作标签。' });
+    });
+
     window.Characters = { get: () => list, exportList, getActs: () => acts, set, snapshot: (chars) => snapshot(chars || list, chars ? [] : acts), caption, ACTS };
 })();

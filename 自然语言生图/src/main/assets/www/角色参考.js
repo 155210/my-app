@@ -185,6 +185,13 @@
         if (nai().model !== lastModel) { lastModel = nai().model; render(); }
     };
 
+    setTimeout(() => {
+        if (!window.Help || !Help.add) return;
+        Help.add({ id: 'dirrefs', group: '多角色与参考图', title: '角色参考（精准参考）', target: '#c-dirrefs', tip: '让人物长得像参考图',
+            anlas: '每张参考每出一张图 +5 Anlas，Opus 免费额度也不抵',
+            text: '加一张图，选「角色」让人物长得像它，「画风」让画风像它，或者两个都要。强度越大越贴近；保真度越大细节越照搬。只有 V4.5 能用，开着时画风参考图（Vibe）会暂停。' });
+    });
+
     window.DirectorRef = {
         /** V4.5 下开着角色参考 → 参考图（Vibe）不发 */
         blocksVibes: (n) => activeOf(n).length > 0,
