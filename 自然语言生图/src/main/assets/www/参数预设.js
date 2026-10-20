@@ -5,7 +5,8 @@
  * nai：设置里 NAI 那一整块，去掉地址、Key、画风模板库（模板库是共用的，预设只记选了哪套）；
  *      以后别的功能往 nai 里加的字段也会自动跟着存。
  * 参考图：只记开关、强度、信息提取量；切换时预设里没有的参考图关掉，已经删掉的跳过（图不复制，省空间）。
- * chars：创作页多角色格子。
+ * 角色参考（dirRefs）同参考图：只记开关、类型、强度、保真度。
+ * chars：创作页多角色格子（含互动，摊在每个角色的 acts 里）。
  */
 (function () {
     'use strict';
@@ -23,7 +24,8 @@
         const nai = {};
         Object.keys(UI.settings.nai).forEach((k) => { if (!SKIP.includes(k)) nai[k] = clone(UI.settings.nai[k]); });
         nai.vibes = (nai.vibes || []).map((v) => ({ id: v.id, on: v.on !== false, strength: v.strength, info: v.info }));
-        const chars = window.Characters ? clone(Characters.get()).map((c) => ({ on: c.on !== false, tag: c.tag || '', negative: c.negative || '', pos: c.pos || '' })) : [];
+        nai.dirRefs = (nai.dirRefs || []).map((v) => ({ id: v.id, on: v.on !== false, type: v.type, strength: v.strength, fidelity: v.fidelity }));
+        const chars = window.Characters ? clone(Characters.exportList ? Characters.exportList() : Characters.get().map((c) => ({ on: c.on !== false, tag: c.tag || '', negative: c.negative || '', pos: c.pos || '' }))) : [];
         return { nai, chars };
     }
     const same = (p) => { const s = snapshot(); return JSON.stringify(s.nai) === JSON.stringify(p.nai) && JSON.stringify(s.chars) === JSON.stringify(p.chars); };
@@ -31,7 +33,12 @@
     function apply(p) {
         const n = UI.settings.nai;
         const want = new Map((p.nai.vibes || []).map((v) => [v.id, v]));
-        Object.keys(p.nai).forEach((k) => { if (!SKIP.includes(k) && k !== 'vibes') n[k] = clone(p.nai[k]); });
+        const wantRef = new Map((p.nai.dirRefs || []).map((v) => [v.id, v]));
+        Object.keys(p.nai).forEach((k) => { if (!SKIP.includes(k) && k !== 'vibes' && k !== 'dirRefs') n[k] = clone(p.nai[k]); });
+        (n.dirRefs || []).forEach((v) => {
+            const w = wantRef.get(v.id);
+            if (w) Object.assign(v, { on: w.on, type: w.type, strength: w.strength, fidelity: w.fidelity }); else v.on = false;
+        });
         (n.vibes || []).forEach((v) => {
             const w = want.get(v.id);
             if (w) Object.assign(v, { on: w.on, strength: w.strength, info: w.info }); else v.on = false;
@@ -43,6 +50,7 @@
         save();
         CreatePage.refresh();
         if (window.Vibes) Vibes.render();
+        if (window.DirectorRef) DirectorRef.render();
         if (window.QuickBar) QuickBar.render();
         render();
     }

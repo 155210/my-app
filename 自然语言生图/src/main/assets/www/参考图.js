@@ -83,6 +83,7 @@
                 const data = await encode(n, d.image, v.info, signal);
                 d.enc = (d.enc || []).filter((e) => !(e.key === key && Math.abs(e.info - v.info) < 0.005)).concat([{ key, info: v.info, data }]);
                 await store(v.id, d);
+                costChanged();
                 toast('info', '「' + v.name + '」已编码（' + KEY_LABEL[key] + '，信息提取量 ' + v.info + '），以后不再扣');
                 render();
             })().finally(() => pending.delete(k)));
@@ -92,6 +93,7 @@
 
     /** 出图前：读出要用的参考图，缺编码的补上 */
     async function prepare(n, signal) {
+        if (blocked(n)) return; // 用着角色参考（精准参考）时参考图不发，也就不用编码
         const v3 = Params.isV3(n.model), key = modelKey(n.model);
         for (const v of (n.vibes || []).filter((x) => x.on !== false)) {
             const d = await load(v.id);
@@ -106,6 +108,23 @@
         }
     }
 
+    /** V4.5 开了角色参考（精准参考）时，官网会把 Vibe 藏起来：两个一起发 NAI 会回坏图。见 角色参考.js */
+    // V5 官方没有 Vibe（网页端不发，/ai/encode-vibe 也拒绝 V5），V5 下整块跳过
+    const blocked = (n) => Params.isV5(n.model) || !!(window.DirectorRef && DirectorRef.blocksVibes(n));
+
+    /** 要花的 Anlas（给出图按钮上的预估）：没编码过的每张首次编码 2；一次用超过 4 张，第 5 张起每张图每张参考 +2 */
+    function cost(n) {
+        if (blocked(n) || Params.isV3(n.model)) return null;
+        const on = (n.vibes || []).filter((x) => x.on !== false);
+        if (!on.length) return null;
+        const key = modelKey(n.model);
+        const fresh = on.filter((v) => { const d = cache.get(v.id); return d && d.image && !findEnc(d, key, v.info); }).length;
+        const perImage = Math.max(0, on.length - 4) * 2, once = fresh * 2;
+        return perImage || once ? { perImage, once, label: '画风参考图' } : null;
+    }
+    if (window.Cost && Cost.addExtra) Cost.addExtra((n) => cost(n));
+    const costChanged = () => { if (window.Cost && Cost.refresh) Cost.refresh(); };
+
     const generate = Nai.generate;
     Nai.generate = async function (n, p, signal) {
         await prepare(n, signal);
@@ -114,7 +133,7 @@
 
     Nai.addHook((params, n, p, extra) => {
         const on = (n.vibes || []).filter((x) => x.on !== false);
-        if (!on.length) return;
+        if (!on.length || blocked(n)) return;
         const v3 = Params.isV3(n.model), key = modelKey(n.model);
         const used = [];
         for (const v of on) {
@@ -200,20 +219,63 @@
         nai().vibes.push({ id, name: x.name, on: true, strength: round2(x.strength), info: round2(x.info) });
         UI.saveSettings();
         render();
+        costChanged();
         toast('success', '「' + x.name + '」' + (x.data.image ? '' : '（只有编码，没带原图）'), '已加画风参考');
     }
 
-    function pickFile() {
-        const inp = document.createElement('input');
-        inp.type = 'file';
-        inp.accept = 'image/*,.naiv4vibe,application/json';
-        inp.onchange = async () => {
-            const f = inp.files && inp.files[0];
-            if (!f) return;
-            try { await addFile(f); } catch (e) { toast('error', e.message || String(e), '加参考图失败'); }
-        };
-        inp.click();
+    // ------------------------------------------------------------
+    // 选图：手机里的文件，或者 App 图库里的一张（角色参考.js 也用）
+    // ------------------------------------------------------------
+    function pickPhone(accept) {
+        return new Promise((resolve) => {
+            const inp = document.createElement('input');
+            inp.type = 'file';
+            inp.accept = accept || 'image/*';
+            inp.onchange = () => resolve((inp.files && inp.files[0]) || null);
+            inp.click();
+        });
     }
+
+    async function pickGallery() {
+        const items = (await Gallery.list()).slice(0, 90);
+        if (!items.length) { toast('info', '图库里还没有图'); return null; }
+        return new Promise((resolve) => {
+            let done = false;
+            const L = UI.openLayer('sheet', '<div class="grip"></div><h3>从图库选一张</h3>'
+                + '<div class="grid size-s" style="max-height:60vh;overflow-y:auto">' + items.map((x) => '<div class="thumb" data-id="' + esc(x.id) + '"><img src="' + esc(x.thumb) + '" alt=""></div>').join('') + '</div>'
+                + '<div class="btns"><button class="btn" data-close>取消</button></div>', { onClose: () => { if (!done) resolve(null); } });
+            L.box.querySelector('.grid').onclick = async (e) => {
+                const t = e.target.closest('[data-id]'); if (!t) return;
+                done = true;
+                UI.closeLayer(L, true);
+                const it = items.find((x) => x.id === t.dataset.id);
+                const blob = await Gallery.getBlob(it.id);
+                if (!blob) { toast('error', '原图找不到了'); resolve(null); return; }
+                const d = new Date(it.time || Date.now());
+                resolve(new File([blob], '图库 ' + (d.getMonth() + 1) + '-' + d.getDate() + ' ' + d.getHours() + '时' + d.getMinutes() + '分.' + (it.ext || 'png'), { type: blob.type || 'image/png' }));
+            };
+        });
+    }
+
+    /** 先问从哪选，返回 File 或 null */
+    function pick(title, phoneLabel, accept) {
+        return new Promise((resolve) => {
+            let done = false;
+            const L = UI.openLayer('sheet', '<div class="grip"></div><h3>' + esc(title) + '</h3>'
+                + '<div class="btns" style="flex-direction:column;align-items:stretch">'
+                + '<button class="btn primary" data-src="phone">从手机选（' + esc(phoneLabel) + '）</button>'
+                + '<button class="btn" data-src="gallery">从 App 图库选</button>'
+                + '<button class="btn" data-close>取消</button></div>', { onClose: () => { if (!done) resolve(null); } });
+            L.box.onclick = (e) => {
+                const b = e.target.closest('[data-src]'); if (!b) return;
+                done = true;
+                UI.closeLayer(L, true);
+                // 文件选择框要在点击里直接弹，不能隔一个 await
+                resolve(b.dataset.src === 'phone' ? pickPhone(accept || 'image/*,.naiv4vibe,application/json') : pickGallery());
+            };
+        });
+    }
+    window.RefPick = { pick, pickPhone, pickGallery };
 
     /** 导出成官网能导入的 .naiv4vibe（带上所有已编码的模型） */
     async function exportVibe(v) {
@@ -247,6 +309,8 @@
     function status(v, d) {
         const n = nai();
         if (!d) return '数据找不到了';
+        if (Params.isV5(n.model)) return 'V5 官方不支持画风参考图，切到 V4.5 / V4 / V3 才会用上';
+        if (blocked(n)) return '正在用角色参考（精准参考），这张先不发';
         if (Params.isV3(n.model)) return d.image ? 'V3 直接发原图' : '没带原图，V3 用不了';
         const key = modelKey(n.model), e = findEnc(d, key, v.info);
         if (e) return KEY_LABEL[key] + ' 已编码' + (Math.abs(e.info - v.info) < 0.005 ? '' : '（文件里只有信息提取量 ' + e.info + ' 的）');
@@ -273,7 +337,8 @@
                     + '</div>';
             }).join('')
             + (list.length ? '<div class="card-sub">强度：越大越像参考图。信息提取量：越大带过来的细节越多（内容、构图也会跟着像），只想要画风就调低。'
-                + (list.length > 1 ? '几张的强度加起来超过 1 时 NAI 会按比例压回。' : '') + '</div>' : '');
+                + (list.length > 1 ? '几张的强度加起来超过 1 时 NAI 会按比例压回。' : '')
+                + (n > 4 ? '<br><b>同时开了 ' + n + ' 张：超过 4 张，每出一张图多扣 ' + (n - 4) * 2 + ' Anlas。</b>' : '一次最多 4 张不额外扣 Anlas，第 5 张起每张每次 +2。') + '</div>' : '');
     }
 
     function bind() {
@@ -281,18 +346,22 @@
             const f = e.target.dataset.f, box = e.target.closest('[data-i]');
             if (!f || !box) return;
             const v = nai().vibes[Number(box.dataset.i)];
-            if (f === 'on') { v.on = e.target.checked; UI.saveSettings(); render(); return; }
+            if (f === 'on') { v.on = e.target.checked; UI.saveSettings(); render(); costChanged(); return; }
             if (f === 'name') v.name = e.target.value;
             else {
                 v[f] = round2(Number(e.target.value));
                 e.target.nextElementSibling.textContent = v[f];
-                if (f === 'info') $('[data-st]', box).textContent = status(v, cache.get(v.id));
+                if (f === 'info') { $('[data-st]', box).textContent = status(v, cache.get(v.id)); costChanged(); }
             }
             UI.saveSettings();
         });
         card.addEventListener('click', async (e) => {
             const b = e.target.closest('[data-a]'); if (!b) return;
-            if (b.dataset.a === 'add') { pickFile(); return; }
+            if (b.dataset.a === 'add') {
+                const f = await pick('加画风参考图', '手机里的图片或 .naiv4vibe');
+                if (f) addFile(f).catch((err) => toast('error', err.message || String(err), '加参考图失败'));
+                return;
+            }
             const i = Number(b.closest('[data-i]').dataset.i), v = nai().vibes[i];
             if (b.dataset.a === 'export') exportVibe(v).catch((err) => toast('error', err.message, '导出失败'));
             if (b.dataset.a === 'del') {
@@ -302,6 +371,7 @@
                 cache.delete(v.id);
                 await Store.del('vibe:' + v.id);
                 render();
+                costChanged();
             }
         });
     }
@@ -327,5 +397,12 @@
         if (nai().model !== lastModel) { lastModel = nai().model; render(); }
     };
 
-    window.Vibes = { modelKey, prepare, fromVibeFile, addFile, exportVibe, load, render };
+    setTimeout(() => {
+        if (!window.Help || !Help.add) return;
+        Help.add({ id: 'vibes', group: '多角色与参考图', title: '画风参考图（Vibe）', target: '#c-vibes', tip: '让出图模仿一张图的画风',
+            anlas: '每张图第一次在某个模型上用要编码一次，扣 2 Anlas；同时开超过 4 张，第 5 张起每张每次 +2',
+            text: '加一张图（手机里的、App 图库里的，或官网导出的 .naiv4vibe）。强度越大越像；信息提取量越大带过来的细节越多，只想要画风就调低。V5 官方不支持，开着角色参考时也会暂停。' });
+    });
+
+    window.Vibes = { modelKey, prepare, cost, fromVibeFile, addFile, exportVibe, load, render };
 })();
