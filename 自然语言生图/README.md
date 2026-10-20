@@ -18,6 +18,7 @@ PR 上也会打包，但只放在 Actions 的附件里，不发 Release。
 ├── build.gradle                包名 com.example.nlimage，版本号 = Actions 构建号
 ├── 自然语言生图.keystore
 ├── 测试/网页测试.js            无头浏览器测试（假 AI + 假 NAI），见下
+├── 测试/备份更新测试.js        设置导出导入、检查更新（假 GitHub 接口）
 └── src/main/
     ├── java/com/example/nlimage/   从自制AI问答机照搬的外壳
     │   ├── MainActivity.java     WebView 外壳，加载 assets/www/首页.html，JS 桥 AndroidBridge
@@ -39,6 +40,8 @@ PR 上也会打包，但只放在 Actions 的附件里，不发 Release。
         ├── 页面-设置.js          设置页（AI 接口 / NAI 出图 / 提示词规范）
         ├── 页面-创作.js          创作页
         ├── 页面-图库.js          图库页、大图和配方
+        ├── 备份.js               设置导出 / 导入（设置页「备份」标签，图库不进备份）
+        ├── 更新.js               检查更新：查 Releases 里最新 shengtu-N，和本机 1.0.N 比，交给浏览器下载
         └── 启动.js               启动、底部标签切换
 ```
 
