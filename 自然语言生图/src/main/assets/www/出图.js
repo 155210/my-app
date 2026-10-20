@@ -186,14 +186,33 @@
         if (!String(nai.key || '').trim()) throw new Error('请先填 Key');
         const base = String(nai.url || '').trim().replace(/\/+$/, '');
         const official = /\/\/image\.novelai\.net$/i.test(base);
-        const url = official ? 'https://api.novelai.net/user/subscription' : endpoint(base, 'user/subscription');
-        const r = await fetch(url, { headers: { Authorization: 'Bearer ' + nai.key.trim() } });
-        if (r.status === 404) return null;
-        if (!r.ok) throw await httpError(r, '连接失败');
+        // 官方 2026-08 起把订阅接口挪到了出图域名，老的 api.novelai.net 会回 400「update to the image URL」，留作后备
+        const urls = official
+            ? ['https://image.novelai.net/user/subscription', 'https://api.novelai.net/user/subscription']
+            : [base + '/user/subscription', endpoint(base, 'user/subscription')];
+        let r = null, err = null, missing = 0;
+        for (const url of urls) {
+            try {
+                r = await fetch(url, { headers: { Authorization: 'Bearer ' + nai.key.trim() } });
+            } catch (e) {
+                err = err || e;
+                r = null;
+                continue;
+            }
+            if (r.ok) break;
+            if (r.status === 404) missing++;
+            else if (!err || r.status === 401) err = await httpError(r, '连接失败');
+            r = null;
+        }
+        if (!r) {
+            if (err) throw err;
+            if (missing) return null;
+        }
         const d = await r.json().catch(() => ({}));
         const tier = ['免费', 'Tablet', 'Scroll', 'Opus'][Number(d.tier)] || ('等级 ' + d.tier);
-        const steps = d.trainingStepsLeft || {};
-        const anlas = (Number(steps.fixedTrainingStepsLeft) || 0) + (Number(steps.purchasedTrainingSteps) || 0);
+        const steps = d.trainingStepsLeft;
+        const anlas = typeof steps === 'number' ? steps
+            : (Number(steps && steps.fixedTrainingStepsLeft) || 0) + (Number(steps && steps.purchasedTrainingSteps) || 0);
         return { tier, active: d.active !== false, anlas };
     }
 
