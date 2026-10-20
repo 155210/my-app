@@ -2,7 +2,8 @@
  * 更新.js —— 应用内检查更新（设置页「更新」标签 + 启动时自动看一眼）
  *
  * 看仓库 Releases 里标签为 shengtu-<构建号> 的最新一版，和本机版本号 1.0.<构建号> 比。
- * 有新版就弹框，点「下载」交给系统浏览器下载 APK，下完点开覆盖安装（签名固定，设置和图库都保留）。
+ * 有新版就弹框，点「下载」由外壳（ApkUpdater.java）下载 APK，下完直接调起系统安装（签名固定，覆盖安装，设置和图库都保留）。
+ * 没开「允许安装未知应用」时先跳系统设置，开好返回 App 自动接着装。浏览器调试时退回打开下载地址。
  * 自动检查的开关、上次检查时间、「这版不再提醒」存在存储键 update 里（不进设置备份）。
  */
 (function () {
@@ -64,10 +65,43 @@
     const fmtTime = (t) => (t ? new Date(t).toLocaleString('zh-CN', { hour12: false }) : '');
     const fmtSize = (n) => (n ? (n / 1048576).toFixed(1) + ' MB' : '');
 
+    /** App 里：自己下载，下完调起系统安装；浏览器调试时退回打开下载地址 */
     function download(info) {
-        // 外部链接会被外壳交给系统浏览器，浏览器下载完点开就能安装
-        toast('info', '已交给浏览器下载，下完点开安装包覆盖安装就行');
-        location.href = info.url;
+        const B = window.AndroidBridge;
+        if (!B || !B.updateDownload) {
+            toast('info', '已交给浏览器下载，下完点开安装包覆盖安装就行');
+            location.href = info.url;
+            return;
+        }
+        let finished = false;
+        const L = UI.openLayer('dialog', '<h3>下载新版 build ' + info.build + '</h3>'
+            + '<p data-msg>准备下载…</p><div class="up-bar"><div data-bar></div></div>'
+            + '<p class="help" data-tip>下载完会自动打开安装界面。第一次安装要在系统里允许「安装未知应用」，开好后返回 App 会接着装。</p>'
+            + '<div class="btns"><button class="btn" data-cancel>取消</button><button class="btn primary" data-install hidden>安装</button></div>',
+        { onClose: () => { if (!finished) B.updateCancel(); cleanup(); } });
+        const msg = $('[data-msg]', L.box), bar = $('[data-bar]', L.box), btnI = $('[data-install]', L.box), btnC = $('[data-cancel]', L.box);
+        const mb = (n) => (n / 1048576).toFixed(1);
+        function cleanup() { window.__updateProgress = null; window.__updateDone = null; }
+        function install() {
+            const r = String(B.updateInstall() || '');
+            if (r === 'OK') { msg.textContent = '已打开安装界面，点「安装」覆盖就行，设置和图库都保留。'; }
+            else if (r === 'PERMISSION') { msg.textContent = '请在打开的系统设置里允许「安装未知应用」，然后返回 App，会自动接着安装。'; }
+            else { msg.textContent = r.replace(/^ERR:/, ''); }
+            btnI.hidden = false;
+        }
+        window.__updateProgress = (done, total) => {
+            msg.textContent = '正在下载 ' + mb(done) + (total > 0 ? ' / ' + mb(total) : '') + ' MB';
+            bar.style.width = (total > 0 ? Math.min(100, done * 100 / total) : 50) + '%';
+        };
+        window.__updateDone = (ok, err) => {
+            finished = true;
+            if (!ok) { msg.textContent = '下载失败：' + err; btnC.textContent = '关闭'; return; }
+            btnC.textContent = '关闭';
+            install();
+        };
+        btnC.onclick = () => UI.closeLayer(L);
+        btnI.onclick = install;
+        B.updateDownload(info.url);
     }
 
     /** 弹框问要不要下载；auto = 启动时自动弹的，多一个「这版不再提醒」 */
@@ -77,7 +111,7 @@
             const L = UI.openLayer('dialog', '<h3>有新版：build ' + info.build + '</h3>'
                 + '<p>现在是 ' + esc(currentLabel()) + '。新版发布于 ' + esc(fmtTime(info.time)) + (info.size ? '，' + fmtSize(info.size) : '') + '。</p>'
                 + (info.notes ? '<p style="white-space:pre-wrap;max-height:30vh;overflow-y:auto">' + esc(info.notes) + '</p>' : '')
-                + '<p class="help">下载后点开安装包直接覆盖安装，设置和图库都保留。</p>'
+                + '<p class="help">下载完自动弹出安装，直接覆盖安装，设置和图库都保留。</p>'
                 + '<div class="btns">' + (auto ? '<button class="btn" data-skip>这版不再提醒</button>' : '')
                 + '<button class="btn" data-no>以后再说</button><button class="btn primary" data-yes>下载</button></div>',
             { onClose: () => { if (!done) resolve(false); } });
