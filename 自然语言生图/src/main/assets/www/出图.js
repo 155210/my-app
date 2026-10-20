@@ -22,6 +22,13 @@
     /** 当前选中的画风模板，没选 → null */
     const activeStyle = (nai) => (nai.styleId && (nai.styles || []).find((x) => x.id === nai.styleId)) || null;
 
+    /** 英文描述 + 画风模板的「描述后缀」：前一段没以标点结尾就补个句号 */
+    function joinNl(nl, tail) {
+        nl = String(nl || '').trim(); tail = String(tail || '').trim();
+        if (!nl || !tail) return nl || tail;
+        return (/[.!?。！？]$/.test(nl) ? nl : nl + '.') + ' ' + tail;
+    }
+
     const joinTags = (...parts) => parts.map((s) => String(s || '').trim().replace(/^,+|,+$/g, '').trim()).filter(Boolean).join(', ');
 
     /**
@@ -35,8 +42,8 @@
         const clear = nai.transparent && Params.isV5(nai.model) && !/transparent background/i.test(tag) ? 'transparent background' : '';
         const fur = nai.furry && !Params.isV3(nai.model) && !/^\s*fur dataset\b/i.test(st.prefix || tag) ? 'fur dataset' : '';
         let positive = joinTags(fur, st.prefix, tag, st.suffix, clear, Params.qualityOf(nai));
-        const nl = String(p.nl || '').trim();
-        if (nai.naturalLanguage && Params.supportsNl(nai.model) && nl) positive += '. ' + nl;
+        const nl = joinNl(nai.naturalLanguage ? p.nl : '', Params.supportsNl(nai.model) ? st.nlSuffix : '');
+        if (Params.supportsNl(nai.model) && nl) positive += '. ' + nl;
         const negative = joinTags(Params.negativeOf(nai), st.negative, p.negative);
         return { positive, negative };
     }

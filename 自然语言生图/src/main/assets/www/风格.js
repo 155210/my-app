@@ -13,7 +13,7 @@
     const newId = () => 'st_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 
     function add(from) {
-        const st = Object.assign({ name: '', prefix: '', quality: '', uc: '', suffix: '', negative: '' }, from, { id: newId() });
+        const st = Object.assign({ name: '', prefix: '', quality: '', uc: '', suffix: '', nlSuffix: '', negative: '' }, from, { id: newId() });
         if (from) st.name = (from.name || '未命名') + ' 副本';
         nai().styles.push(st);
         UI.saveSettings();
@@ -40,11 +40,13 @@
                 + '<div class="field"><label>负面提示词（这套专用）' + setBadge(x.uc) + '</label><textarea class="ta small" data-k="' + k + 'uc" placeholder="' + esc(Params.globalNegative(n)) + '"></textarea>'
                 + '<div class="help">留空 = 用「NAI 出图」页的负面词（灰字就是现在会用的）</div></div>')
                 + '<div class="field"><label>后缀（拼在画面标签后、质量词前）</label><textarea class="ta small" data-k="' + k + 'suffix" placeholder="可留空，比如 flat color, cel shading"></textarea></div>'
+                + '<div class="field"><label>描述后缀（接在英文画面描述后面）</label><textarea class="ta small" data-k="' + k + 'nlSuffix" placeholder="可留空，比如 The lighting is soft and warm."></textarea>'
+                + '<div class="help">英文句子，V4.5 / V5 才发；没有英文描述时就单独接在正面最后</div></div>'
                 + '<div class="field"><label>额外负面词（接在负面提示词后面）</label><textarea class="ta small" data-k="' + k + 'negative" placeholder="可留空"></textarea></div>'
                 + '<div class="btns"><button class="btn" data-act="style-copy" data-i="' + i + '">复制一套</button>'
                 + '<button class="btn danger" data-act="style-del" data-i="' + i + '">删除</button></div></div>';
         }).join('');
-        return '<div class="help" style="margin-bottom:12px">画风模板 = 一套画师串 + 质量词 + 负面提示词，切换模板三样一起换（同柏宝绘）。出图时：正面 = 前缀, 画面标签, 后缀, 质量词；负面 = 负面提示词, 额外负面词, AI 补的负面词。质量词、负面提示词留空就用「NAI 出图」页的。</div>'
+        return '<div class="help" style="margin-bottom:12px">画风模板 = 一套画师串 + 质量词 + 负面提示词，切换模板三样一起换（同柏宝绘）。出图时：正面 = 前缀, 画面标签, 后缀, 质量词. 英文描述 描述后缀；负面 = 负面提示词, 额外负面词, AI 补的负面词。质量词、负面提示词留空就用「NAI 出图」页的。</div>'
             + '<div class="field"><label>当前用</label><select data-k="nai.styleId"><option value="">不用模板</option>'
             + n.styles.map((x) => '<option value="' + esc(x.id) + '">' + esc(x.name || '未命名') + '</option>').join('') + '</select></div>'
             + list
