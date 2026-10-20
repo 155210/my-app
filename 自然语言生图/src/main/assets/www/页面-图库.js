@@ -459,7 +459,7 @@
     // ------------------------------------------------------------
     // 完整配方
     // ------------------------------------------------------------
-    const KNOWN = ['positive', 'negative', 'width', 'height', 'seed', 'model', 'sampler', 'steps', 'scale', 'size', 'cfgRescale', 'noiseSchedule', 'style', 'characters', 'vibes'];
+    const KNOWN = ['positive', 'negative', 'width', 'height', 'seed', 'model', 'sampler', 'steps', 'scale', 'size', 'cfgRescale', 'noiseSchedule', 'style', 'characters', 'vibes', 'dirRefs'];
 
     function recipeText(item) {
         const m = item.meta || {};
@@ -486,7 +486,8 @@
             ['AI 补的负面词', item.extraNegative],
             ['正面（实际发送）', m.positive],
             ['负面（实际发送）', m.negative],
-            ['角色', (m.characters || []).map((c, i) => '角色 ' + (i + 1) + '：' + c.tag + (c.negative ? '\n  不要：' + c.negative : '')).join('\n')],
+            ['角色', (m.characters || []).map((c, i) => '角色 ' + (i + 1) + '：' + (c.acts && c.acts.length ? c.acts.join(', ') + ', ' : '') + c.tag + (c.negative ? '\n  不要：' + c.negative : '')).join('\n')],
+            ['角色参考', (m.dirRefs || []).map((v) => v.name + '（' + ({ character: '角色', style: '画风' }[v.type] || '角色+画风') + '，强度 ' + v.strength + '，保真度 ' + v.fidelity + '）').join('\n')],
             ['画风参考图', (m.vibes || []).map((v) => v.name + '（强度 ' + v.strength + '，信息提取量 ' + v.info + '）').join('\n')],
             ['参数', rows.map((r) => r[0] + '：' + r[1]).join('\n')],
         ];

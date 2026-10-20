@@ -113,6 +113,7 @@
             transparent: false, // V5 透明背景（出 PNG 带透明通道）
             furry: false,       // Furry 模式：正面最前面加 fur dataset（V4 起）
             vibes: [],          // 画风参考图：{ id, name, on, strength 强度, info 信息提取量 }；图和编码另存在 vibe:<id>（见 参考图.js）
+            dirRefs: [],        // 角色参考（精准参考）：{ id, name, on, type, strength, fidelity }；图另存在 dref:<id>（见 角色参考.js）
         },
         // 留空 = 内置（规范见 写词.js，破限词、思维链见 自定义提示词.js）；heavy = 重型提示词（酒馆预设），打开时在 自定义提示词.js 里补全
         prompts: { system: '', jailbreak: '', thinking: '', useJailbreak: true, useThinking: true, retries: 1, heavy: null },
@@ -133,6 +134,7 @@
             nai.styleId = id;
         }
         nai.artist = '';
+        nai.dirRefs = (Array.isArray(nai.dirRefs) ? nai.dirRefs : []).filter((x) => x && x.id).map((x) => Object.assign({ name: '', on: true, type: 'character', strength: 1, fidelity: 1 }, x));
         nai.vibes = (Array.isArray(nai.vibes) ? nai.vibes : []).filter((x) => x && x.id).map((x) => Object.assign({ name: '', on: true, strength: 0.6, info: 1 }, x));
         if (nai.styleId && !nai.styles.some((x) => x.id === nai.styleId)) nai.styleId = '';
         if (!MODELS.some((m) => m.value === nai.model)) nai.model = DEFAULTS.nai.model;
