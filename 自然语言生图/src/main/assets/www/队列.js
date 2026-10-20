@@ -175,27 +175,57 @@
     // ------------------------------------------------------------
     let panel = null;
 
-    function jobLine(j) {
-        const esc = UI.esc;
-        const st = j.state === 'waiting' ? '排队中'
+    function jobStatus(j) {
+        return j.state === 'waiting' ? '排队中'
             : j.state === 'running' ? (j.attempt ? '出图中（第 ' + (j.attempt + 1) + ' 次尝试）' : '出图中')
                 : '限流了，' + Math.max(0, Math.ceil((j.retryAt - Date.now()) / 1000)) + ' 秒后自动重试（已重试 ' + j.attempt + ' 次）';
-        return '<div class="q-item"><div class="grow"><div class="q-label">' + esc(j.label) + '</div><div class="q-st' + (j.state === 'retry' ? ' warn' : '') + '">' + esc(st) + '</div></div>'
-            + '<button class="btn small danger" data-cancel="' + j.id + '">取消</button></div>';
     }
 
-    function failLine(f) {
-        const esc = UI.esc;
-        return '<div class="q-item"><div class="grow"><div class="q-label">' + esc(f.label) + '</div><div class="q-st err">' + esc(f.error) + '</div></div>'
-            + (f.retry ? '<button class="btn small" data-retry="' + f.id + '">重试</button>' : '') + '</div>';
+    /**
+     * 一行：标签 + 状态 + 按钮。按 key 复用已有的行，只改文字，
+     * 不整块重建，免得倒计时每秒刷新时按钮被换掉、点了没反应
+     */
+    function syncRow(box, key, label, st, cls, btnHtml, before) {
+        let row = box.querySelector('[data-row="' + key + '"]');
+        if (!row) {
+            row = document.createElement('div');
+            row.className = 'q-item';
+            row.dataset.row = key;
+            row.innerHTML = '<div class="grow"><div class="q-label"></div><div class="q-st"></div></div>' + btnHtml;
+        }
+        const l = row.querySelector('.q-label'), t = row.querySelector('.q-st');
+        if (l.textContent !== label) l.textContent = label;
+        if (t.textContent !== st) t.textContent = st;
+        const c = 'q-st' + (cls ? ' ' + cls : '');
+        if (t.className !== c) t.className = c;
+        if (row.previousElementSibling !== before || row.parentNode !== box) {
+            if (before) before.after(row); else box.prepend(row);
+        }
+        return row;
     }
 
     function renderPanel() {
         if (!panel || !panel.el.isConnected) { panel = null; return; }
         const c = cfg();
-        const list = UI.$('[data-q-list]', panel.box);
-        list.innerHTML = (jobs.length ? jobs.map(jobLine).join('') : '<div class="card-sub" style="padding:6px 0">现在没有在出的图</div>')
-            + (failed.length ? '<div class="label" style="margin-top:12px">失败的</div>' + failed.map(failLine).join('') : '');
+        const box = UI.$('[data-q-list]', panel.box);
+        const keep = new Set();
+        let prev = null;
+        const put = (el) => { keep.add(el); prev = el; };
+        if (jobs.length) {
+            jobs.forEach((j) => put(syncRow(box, 'j' + j.id, j.label, jobStatus(j), j.state === 'retry' ? 'warn' : '',
+                '<button class="btn small danger" data-cancel="' + j.id + '">取消</button>', prev)));
+        } else {
+            put(syncRow(box, 'empty', '', '现在没有在出的图', '', '', prev));
+        }
+        if (failed.length) {
+            let h = box.querySelector('[data-row="fail-head"]');
+            if (!h) { h = document.createElement('div'); h.className = 'label'; h.style.marginTop = '12px'; h.dataset.row = 'fail-head'; h.textContent = '失败的'; }
+            if (h.previousElementSibling !== prev || h.parentNode !== box) { if (prev) prev.after(h); else box.prepend(h); }
+            put(h);
+            failed.forEach((f) => put(syncRow(box, 'f' + f.id, f.label, f.error, 'err',
+                f.retry ? '<button class="btn small" data-retry="' + f.id + '">重试</button>' : '', prev)));
+        }
+        Array.from(box.children).forEach((el) => { if (!keep.has(el)) el.remove(); });
         UI.$('[data-q-info]', panel.box).textContent = '同时出 ' + c.concurrency + ' 张'
             + (c.retry429 ? ' · 限流自动重试（最多 ' + c.maxRetries + ' 次）' : ' · 限流不重试');
         UI.$('[data-q-all]', panel.box).hidden = !jobs.length;
