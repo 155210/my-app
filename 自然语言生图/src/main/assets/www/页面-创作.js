@@ -8,10 +8,10 @@
     const root = () => $('#view-create');
 
     // 草稿：描述和提示词，切走、重开 App 都还在
-    let draft = { desc: '', tag: '', nl: '', negative: '', size: 'portrait' };
+    let draft = { desc: '', tag: '', nl: '', negative: '', size: 'portrait', count: 1 };
     let writing = null;   // 正在写提示词时的 AbortController
-    let drawing = 0;      // 排队 + 正在出的张数
-    let lastItem = null;  // 本次打开后最近出的一张
+    let results = [];     // 本次打开后出的图，最新的在前，最多显示 RESULT_MAX 张
+    const RESULT_MAX = 4;
 
     let saveTimer = 0;
     function saveDraft() {
@@ -39,11 +39,13 @@
             + '<div class="field" id="c-nl-wrap"><label>英文画面描述（NAI 4.5 / V5 用）</label><textarea class="ta" id="c-nl"></textarea></div>'
             + '<div class="field"><label>补充负面词（不想出现的东西）</label><textarea class="ta small" id="c-neg" placeholder="可留空；通用负面词在设置里，会自动加"></textarea></div>'
             + '<div class="row">'
-            + '<div class="seg" id="c-size"><button data-v="portrait">竖图</button><button data-v="landscape">横图</button></div>'
+            + '<div class="seg" id="c-size" style="flex-shrink:0"><button data-v="portrait">竖图</button><button data-v="landscape">横图</button></div>'
             + '<span class="grow"></span>'
             + '<button class="btn" id="c-preview">实际发送</button>'
+            + '<select id="c-count" style="width:auto;padding:8px 4px" aria-label="一次出几张">' + [1, 2, 3, 4].map((v) => '<option value="' + v + '">' + v + ' 张</option>').join('') + '</select>'
             + '<button class="btn primary" id="c-draw">出图</button></div>'
-            + '<div class="card-sub" id="c-status"></div>'
+            + '<div class="row" style="margin-top:8px"><div class="card-sub grow" id="c-status" style="margin:0"></div>'
+            + '<button class="btn small" id="c-queue" hidden>队列</button><button class="btn small danger" id="c-cancel" hidden>全部取消</button></div>'
             + '</div>'
 
             + '<div id="c-result"></div>';
@@ -56,6 +58,7 @@
         $('#c-nl', r).value = draft.nl;
         $('#c-neg', r).value = draft.negative;
         $('#c-auto', r).checked = UI.settings.autoDraw;
+        $('#c-count', r).value = String(draft.count || 1);
         refresh();
     }
 
@@ -66,7 +69,19 @@
         $('#c-nl-wrap', r).hidden = !nlVisible();
         UI.$$('#c-size button', r).forEach((b) => b.classList.toggle('on', b.dataset.v === draft.size));
         const s = UI.settings;
-        $('#c-status', r).textContent = (drawing ? '出图中' + (drawing > 1 ? '（还有 ' + (drawing - 1) + ' 张排队）' : '') + '… · ' : '')
+        const q = Queue.state();
+        const busy = q.running + q.waiting;
+        let qs = '';
+        if (busy) {
+            const n = q.running - q.retrying;
+            qs = [n ? '出图中 ' + n + ' 张' : '', q.waiting ? '排队 ' + q.waiting + ' 张' : '',
+                q.retrying ? '限流等待 ' + q.wait + ' 秒后重试' : ''].filter(Boolean).join('，') + ' · ';
+        }
+        $('#c-queue', r).hidden = !busy && !q.failed;
+        $('#c-queue', r).textContent = q.failed && !busy ? '失败 ' + q.failed + ' 张' : '队列';
+        $('#c-cancel', r).hidden = !busy;
+        Queue.refill(); // 设置里改了并发数
+        $('#c-status', r).textContent = qs
             + Params.modelLabel(s.nai.model) + ' · ' + (draft.size === 'landscape' ? s.nai.landscapeSize : s.nai.portraitSize)
             + (Number(s.nai.seed) > 0 ? ' · 种子 ' + s.nai.seed : '');
         $('#c-write', r).textContent = writing ? '停止' : 'AI 写提示词';
@@ -83,7 +98,10 @@
         on('#c-auto', 'change', (e) => { UI.settings.autoDraw = e.target.checked; UI.saveSettings(); });
         on('#c-size', 'click', (e) => { const b = e.target.closest('button'); if (!b) return; draft.size = b.dataset.v; saveDraft(); refresh(); });
         on('#c-write', 'click', () => (writing ? writing.abort() : write()));
+        on('#c-count', 'change', (e) => { draft.count = Number(e.target.value) || 1; saveDraft(); });
         on('#c-draw', 'click', () => draw());
+        on('#c-queue', 'click', () => Queue.openPanel());
+        on('#c-cancel', 'click', () => Queue.cancelAll());
         on('#c-preview', 'click', preview);
     }
 
@@ -115,48 +133,80 @@
         }
     }
 
-    /** 出图（重画时传入旧的那套提示词） */
-    function draw(p) {
+    const randomSeed = () => Math.floor(Math.random() * 2 ** 32);
+
+    /**
+     * 出图：一次排 count 张进队列（重画时传入旧的那套提示词）
+     * p.seed 给了就用它；锁了种子又一次出多张时，第 2 张起种子 +1、+2…，不然出来一模一样
+     */
+    function draw(p, count) {
         p = p || { desc: draft.desc, tag: draft.tag, nl: draft.nl, negative: draft.negative, size: draft.size };
+        count = count || Number(draft.count) || 1;
         if (!String(p.tag || '').trim()) { toast('warning', '正面提示词是空的，先让 AI 写或者自己填'); return; }
         // 先校验尺寸等，免得排进队才报错
         try { Nai.buildBody(UI.settings.nai, p); } catch (e) { toast('error', e.message); return; }
-        drawing++;
-        refresh();
-        const nai = Object.assign({}, UI.settings.nai); // 排队期间改设置不影响这张
+        const nai = Object.assign({}, UI.settings.nai); // 排队期间改设置不影响这批
+        const locked = Number(nai.seed) > 0 ? Number(nai.seed) : 0;
+        const name = String(p.desc || p.tag).trim().replace(/\s+/g, ' ').slice(0, 24);
+        for (let i = 0; i < count; i++) {
+            const one = Object.assign({}, p);
+            if (one.seed == null && locked && count > 1) one.seed = (locked + i) % 2 ** 32;
+            enqueue(nai, one, name + (count > 1 ? '（' + (i + 1) + '/' + count + '）' : ''));
+        }
+    }
+
+    function enqueue(nai, p, label) {
         Queue.add(async (signal) => {
             const out = await Nai.generate(nai, p, signal);
             return Gallery.add(out.blob, out.ext, {
                 desc: p.desc || '', tag: p.tag, nl: p.nl || '', extraNegative: p.negative || '', meta: out.meta,
             });
+        }, {
+            label,
+            // 失败后在队列里点「重试」：同一套提示词、同一个种子（如果原来指定了）再排一次
+            retry: () => enqueue(nai, p, label),
         }).then((item) => {
-            lastItem = item;
+            results = [item].concat(results.filter((x) => x.id !== item.id)).slice(0, RESULT_MAX);
             showResult();
             if (window.GalleryPage) GalleryPage.refresh();
         }).catch((e) => {
             if (e.name !== 'AbortError') toast('error', e.message || String(e), '出图失败');
-        }).finally(() => { drawing--; refresh(); });
+        }).finally(refresh);
     }
 
+    /** 重绘：同一套提示词换个种子再出一张 */
+    function redraw(item) {
+        draw({ desc: item.desc, tag: item.tag, nl: item.nl, negative: item.extraNegative, size: item.meta.size, seed: randomSeed() }, 1);
+    }
+
+    let urls = [], showSeq = 0;
     async function showResult() {
         const box = $('#c-result', root());
-        if (!lastItem) { box.innerHTML = ''; return; }
-        const blob = await Gallery.getBlob(lastItem.id);
-        if (!blob) { box.innerHTML = ''; return; }
-        const url = URL.createObjectURL(blob);
-        box.innerHTML = '<div class="card result"><img src="' + url + '" alt="">'
-            + '<div class="acts"><button data-a="view">' + UI.ICON.reuse + '看配方</button><button data-a="again">' + UI.ICON.regen + '同提示词再出一张</button>'
-            + '<button data-a="save">' + UI.ICON.save + '存到相册</button></div></div>';
-        const item = lastItem;
-        $('img', box).onclick = () => GalleryPage.openViewer(item.id);
-        box.querySelector('.acts').onclick = async (e) => {
-            const b = e.target.closest('button'); if (!b) return;
-            if (b.dataset.a === 'view') GalleryPage.openViewer(item.id);
-            if (b.dataset.a === 'again') draw({ desc: item.desc, tag: item.tag, nl: item.nl, negative: item.extraNegative, size: item.meta.size });
-            if (b.dataset.a === 'save') {
-                try { toast('success', await Gallery.saveToPhone(item), '已保存'); } catch (err) { toast('error', err.message, '保存失败'); }
-            }
-        };
+        const my = ++showSeq;
+        const list = [];
+        for (const item of results) {
+            const blob = await Gallery.getBlob(item.id);
+            if (blob) list.push({ item, url: URL.createObjectURL(blob) });
+        }
+        // 连着出好几张时，只让最后一次刷新生效
+        if (my !== showSeq) { list.forEach((x) => URL.revokeObjectURL(x.url)); return; }
+        urls.forEach((u) => URL.revokeObjectURL(u));
+        urls = list.map((x) => x.url);
+        box.innerHTML = list.map((x, i) => '<div class="card result" data-i="' + i + '"><img src="' + x.url + '" alt="">'
+            + '<div class="acts"><button data-a="view">' + UI.ICON.reuse + '看配方</button><button data-a="again">' + UI.ICON.regen + '重绘</button>'
+            + '<button data-a="save">' + UI.ICON.save + '存到相册</button></div></div>').join('');
+        UI.$$('.result', box).forEach((card) => {
+            const item = list[Number(card.dataset.i)].item;
+            $('img', card).onclick = () => GalleryPage.openViewer(item.id);
+            card.querySelector('.acts').onclick = async (e) => {
+                const b = e.target.closest('button'); if (!b) return;
+                if (b.dataset.a === 'view') GalleryPage.openViewer(item.id);
+                if (b.dataset.a === 'again') redraw(item);
+                if (b.dataset.a === 'save') {
+                    try { toast('success', await Gallery.saveToPhone(item), '已保存'); } catch (err) { toast('error', err.message, '保存失败'); }
+                }
+            };
+        });
     }
 
     function preview() {
@@ -187,5 +237,5 @@
         Queue.onChange(refresh);
     }
 
-    window.CreatePage = { init, refresh, reuse, draw };
+    window.CreatePage = { init, refresh, reuse, draw, redraw };
 })();
