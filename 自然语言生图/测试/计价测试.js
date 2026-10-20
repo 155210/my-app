@@ -78,6 +78,19 @@ const fails = []; const ok = (c, m) => { if (!c) fails.push(m); console.log((c ?
   tier = 3; await page.evaluate(() => QuickBar.refreshAnlas(true));
   await page.waitForFunction(() => document.querySelector('#c-draw .cost-tag').textContent === '免费');
   ok(true, 'Opus 账号、额度没用完 → 出图按钮显示免费');
+  await page.selectOption('#c-count', '3');
+  await page.waitForFunction(() => document.querySelector('#c-draw .cost-tag').textContent === '免费 ×3');
+  const t3 = await page.getAttribute('#c-draw', 'title');
+  ok(t3.includes('张张免费') && t3.includes('约用掉 Opus 额度 0.2%'), '3 张：免费 ×3，说明每张单独发、约用掉多少额度：' + t3);
+  // 长按出图按钮：弹明细，不出图
+  const nb = bodies.length;
+  await page.evaluate(() => { const d = document.querySelector('#c-draw'); d.dispatchEvent(new Event('touchstart')); });
+  await page.waitForTimeout(700);
+  await page.evaluate(() => { const d = document.querySelector('#c-draw'); d.dispatchEvent(new Event('touchend')); d.click(); });
+  await page.waitForTimeout(300);
+  const toastText = await page.evaluate(() => document.body.innerText.includes('预计花费') && document.body.innerText.includes('张张免费'));
+  ok(toastText && bodies.length === nb, '长按出图按钮弹出花费明细，不会出图');
+  await page.selectOption('#c-count', '1');
   negative = true; await page.evaluate(() => QuickBar.refreshAnlas(true));
   await page.waitForFunction(() => document.querySelector('#c-draw .cost-tag').textContent === '30 Anlas');
   ok(true, 'Opus 额度透支 → 显示 30 Anlas');
