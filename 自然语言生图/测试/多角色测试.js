@@ -49,7 +49,6 @@ const tmp = fs.mkdtempSync(path.join(OUT, 'vibe-'));
   ok((await page.$$('.char-item')).length === 3, '加了三个角色');
   await page.fill('.char-item[data-i="0"] [data-f="tag"]', '1girl, long black hair, smile');
   await page.fill('.char-item[data-i="0"] [data-f="negative"]', 'short hair');
-  await page.selectOption('.char-item[data-i="0"] [data-f="pos"]', '0.3,0.5');
   await page.fill('.char-item[data-i="1"] [data-f="tag"]', '1boy, glasses');
   await page.fill('.char-item[data-i="2"] [data-f="tag"]', 'girl, red hair');
   await page.click('.char-item[data-i="2"] .switch'); // 关掉第三个
@@ -61,12 +60,37 @@ const tmp = fs.mkdtempSync(path.join(OUT, 'vibe-'));
   await page.evaluate(() => CreatePage.refresh());
   ok(await page.evaluate(() => document.activeElement && document.activeElement.dataset.f === 'tag'), '创作页刷新时不打断角色格子的输入');
 
+  // 不摆位置：use_coords 关
+  let q = await page.evaluate(() => Nai.buildBody(UI.settings.nai, { tag: 'x' }).body.parameters);
+  ok(q.use_coords === false && q.v4_prompt.caption.char_captions[0].centers[0].x === 0.5, '不摆位置时让模型自己安排');
+  // 打开「自己摆位置」：三个圆点排开；拖第 1 个到左上，V4.5 吸到网格
+  await page.click('#c-chars label:has([data-a="place"]) .switch');
+  ok((await page.$$('.pos-dot')).length === 3 && await page.isVisible('.pos-pad.grid5'), '打开自己摆位置：出现画布和三个圆点（V4.5 带网格）');
+  await page.$eval('.pos-pad', (el) => el.scrollIntoView({ block: 'center' }));
+  const pad = await page.$eval('.pos-pad', (el) => { const r = el.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; });
+  const dot0 = await page.$eval('.pos-dot[data-dot="0"]', (el) => { const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+  await page.mouse.move(dot0.x, dot0.y);
+  await page.mouse.down();
+  await page.mouse.move(pad.x + pad.w * 0.15, pad.y + pad.h * 0.22, { steps: 5 });
+  await page.mouse.up();
+  ok(await page.evaluate(() => Characters.get()[0].pos) === '0.1,0.3', '拖到左上松手吸到最近的格子（0.1,0.3）');
+  // 互动：角色 1 拥抱 角色 2
+  await page.click('#c-chars [data-a="act-add"]');
+  ok((await page.$$('.act-item')).length === 1 && (await page.textContent('.act-item')).includes('角色 1 → 角色 2'), '加一个互动，默认角色 1 → 角色 2 拥抱');
+  await page.screenshot({ path: OUT + '/多角色-摆位.png' });
+
   await page.click('#c-draw');
   await page.waitForFunction(() => document.querySelector('#c-result img'), null, { timeout: 8000 });
   let p = bodies[bodies.length - 1].parameters;
   const cc = p.v4_prompt.caption.char_captions;
-  ok(cc.length === 2 && cc[0].char_caption === 'girl, long black hair, smile' && cc[1].char_caption === 'boy, glasses', '角色提示词进 char_captions，1girl/1boy 换成 girl/boy');
-  ok(cc[0].centers[0].x === 0.3 && cc[1].centers[0].x === 0.5 && p.v4_prompt.use_coords === true && p.use_coords === true, '指定了站位就开 use_coords');
+  ok(cc.length === 2 && cc[0].char_caption === 'source#hug, girl, long black hair, smile' && cc[1].char_caption === 'target#hug, boy, glasses', '角色提示词进 char_captions，1girl/1boy 换成 girl/boy，互动加 source#/target#：' + cc.map((x) => x.char_caption).join(' | '));
+  ok(cc[0].centers[0].x === 0.1 && cc[0].centers[0].y === 0.3 && cc[1].centers[0].x === 0.5 && p.v4_prompt.use_coords === true && p.use_coords === true, '摆了位置就开 use_coords，坐标是网格值');
+  // 互相：mutual#
+  await page.selectOption('.act-item [data-g="pick"]', 'holding hands');
+  ok(await page.isChecked('.act-item [data-g="mutual"]'), '选「牵手」自动勾上互相');
+  q = await page.evaluate(() => Nai.buildBody(UI.settings.nai, { tag: 'x' }).body.parameters.v4_prompt.caption.char_captions.map((x) => x.char_caption));
+  ok(q[0].startsWith('mutual#holding hands, ') && q[1].startsWith('mutual#holding hands, '), '互相的动作两人都加 mutual#');
+  await page.selectOption('.act-item [data-g="pick"]', 'hug');
   const nc = p.v4_negative_prompt.caption.char_captions;
   ok(nc.length === 2 && nc[0].char_caption === 'short hair' && nc[1].char_caption === '', '每个角色单独的负面词');
   ok(p.characterPrompts.length === 2 && p.characterPrompts[0].uc === 'short hair', 'characterPrompts 也发了一份');
@@ -74,35 +98,51 @@ const tmp = fs.mkdtempSync(path.join(OUT, 'vibe-'));
 
   // 配方里记下角色；重绘按那张图的角色来
   const item = await page.evaluate(async () => (await Gallery.list())[0]);
-  ok(item.meta.characters && item.meta.characters.length === 2, '图库配方记下了角色');
+  ok(item.meta.characters && item.meta.characters.length === 2 && item.meta.characters[0].acts[0] === 'source#hug', '图库配方记下了角色和互动');
   await page.fill('.char-item[data-i="1"] [data-f="tag"]', '1boy, hat');
   const nr = bodies.length;
   await page.click('#c-result [data-a="again"]');
   for (let i = 0; i < 30 && bodies.length === nr; i++) await page.waitForTimeout(100);
   p = bodies[bodies.length - 1].parameters;
-  ok(p.v4_prompt.caption.char_captions[1].char_caption === 'boy, glasses', '重绘用那张图当时的角色');
+  ok(p.v4_prompt.caption.char_captions[1].char_caption === 'target#hug, boy, glasses' && p.v4_prompt.caption.char_captions[0].centers[0].x === 0.1, '重绘用那张图当时的角色、互动、位置');
   // 「用这套重画」把角色填回来
   await page.evaluate(() => Characters.set([]));
   await page.evaluate((it) => CreatePage.reuse(it), item);
   ok((await page.$$('.char-item')).length === 2 && await page.inputValue('.char-item[data-i="1"] [data-f="tag"]') === '1boy, glasses', '「用这套重画」把角色填回创作页');
+  ok(await page.evaluate(() => { const a = Characters.getActs(), c = Characters.get(); return a.length === 1 && a[0].act === 'hug' && a[0].a === c[0].id && a[0].b === c[1].id && !a[0].mutual; }), '「用这套重画」把互动也拆回来');
 
   // V3：没有 char_captions，界面提示
   await page.evaluate(() => { UI.settings.nai.model = 'nai-diffusion-3'; CreatePage.refresh(); });
   ok((await page.textContent('#c-chars')).includes('V3 不支持'), '选 V3 时提示角色会被忽略');
   const v3 = await page.evaluate(() => Nai.buildBody(UI.settings.nai, { tag: 'x' }).body.parameters);
   ok(!v3.v4_prompt && !v3.characterPrompts, 'V3 请求里没有角色');
+  // V5：自由摆位，不吸网格
   await page.evaluate(() => { UI.settings.nai.model = 'nai-diffusion-5-full'; CreatePage.refresh(); });
-  await page.screenshot({ path: OUT + '/多角色.png', fullPage: true });
+  ok(await page.isVisible('.pos-pad') && !(await page.$('.pos-pad.grid5')), 'V5 的画布没有网格');
+  await page.$eval('.pos-pad', (el) => el.scrollIntoView({ block: 'center' }));
+  const pad5 = await page.$eval('.pos-pad', (el) => { const r = el.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; });
+  const d1 = await page.$eval('.pos-dot[data-dot="1"]', (el) => { const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+  await page.mouse.move(d1.x, d1.y);
+  await page.mouse.down();
+  await page.mouse.move(pad5.x + pad5.w * 0.63, pad5.y + pad5.h * 0.44, { steps: 5 });
+  await page.mouse.up();
+  const c5 = await page.evaluate(() => Nai.buildBody(UI.settings.nai, { tag: 'x' }).body.parameters.v4_prompt.caption.char_captions[1].centers[0]);
+  ok(Math.abs(c5.x - 0.63) < 0.02 && Math.abs(c5.y - 0.44) < 0.02, 'V5 任意位置原样发：' + JSON.stringify(c5));
+  await page.click('#c-chars label:has([data-a="place"]) .switch');
+  ok(!(await page.$('.pos-pad')) && await page.evaluate(() => Characters.get().every((c) => !c.pos)), '关掉自己摆位置，位置清空');
 
-  // ---------- 画风参考图 ----------
+  // ---------- 画风参考图（V5 官方没有，用 V4.5 Curated 测） ----------
+  await page.evaluate(() => { UI.settings.nai.model = 'nai-diffusion-4-5-curated'; CreatePage.refresh(); });
   const img = path.join(tmp, 'ref.png') // 文件名用英文：Playwright 传中文文件名时 change 事件不触发;
   fs.writeFileSync(img, PNG);
-  let chooser = page.waitForEvent('filechooser');
   await page.click('#c-vibes [data-a="add"]');
+  let chooser = page.waitForEvent('filechooser');
+  await page.click('[data-src="phone"]');
   await (await chooser).setFiles(img);
   await page.waitForSelector('.vibe-item');
   ok(await page.inputValue('.vibe-item [data-f="name"]') === 'ref', '加了一张参考图，名字取文件名');
   ok((await page.textContent('.vibe-item [data-st]')).includes('还没编码'), '显示还没编码、出图时扣 2 Anlas');
+  ok(await page.evaluate(() => { const e = Cost.estimate(UI.settings.nai, {}, 1).parts.find((x) => x.label === '画风参考图'); return e && e.anlas === 2; }), '出图预估里算上首次编码 2 Anlas');
   await page.$eval('.vibe-item [data-f="strength"]', (el) => { el.value = '0.8'; el.dispatchEvent(new Event('input', { bubbles: true })); });
   await page.$eval('.vibe-item [data-f="info"]', (el) => { el.value = '0.5'; el.dispatchEvent(new Event('input', { bubbles: true })); });
   ok(await page.evaluate(() => UI.settings.nai.vibes[0].strength === 0.8 && UI.settings.nai.vibes[0].info === 0.5), '强度、信息提取量存进设置');
@@ -113,7 +153,7 @@ const tmp = fs.mkdtempSync(path.join(OUT, 'vibe-'));
   await page.click('#c-draw');
   for (let i = 0; i < 40 && bodies.length < n0 + 2; i++) await page.waitForTimeout(150);
   ok(encodes.length === 1, '一次出两张只编码一次：' + encodes.length);
-  ok(encodes[0].information_extracted === 0.5 && encodes[0].model === 'nai-diffusion-5-full' && encodes[0].image === PNG.toString('base64'), '编码请求带原图、信息提取量、模型');
+  ok(encodes[0].information_extracted === 0.5 && encodes[0].model === 'nai-diffusion-4-5-curated' && encodes[0].image === PNG.toString('base64'), '编码请求带原图、信息提取量、模型');
   p = bodies[bodies.length - 1].parameters;
   ok(p.reference_image_multiple_cached.length === 1 && p.reference_image_multiple_cached[0].data === Buffer.alloc(200, 1).toString('base64') && p.reference_strength_multiple[0] === 0.8, '出图带上编码和强度');
   ok((await page.textContent('.vibe-item [data-st]')).includes('已编码'), '编码后显示已编码');
@@ -122,6 +162,7 @@ const tmp = fs.mkdtempSync(path.join(OUT, 'vibe-'));
   await page.click('#c-draw');
   await page.waitForTimeout(500);
   ok(encodes.length === 1, '已编码的不再扣');
+  ok(!(await page.evaluate(() => Cost.estimate(UI.settings.nai, {}, 1).parts.some((x) => x.label === '画风参考图'))), '编码过了预估里不再算编码费');
   await page.$eval('.vibe-item [data-f="info"]', (el) => { el.value = '1'; el.dispatchEvent(new Event('input', { bubbles: true })); });
   await page.click('#c-draw');
   await page.waitForTimeout(600);
@@ -145,16 +186,17 @@ const tmp = fs.mkdtempSync(path.join(OUT, 'vibe-'));
   const file = path.join(tmp, 'out.naiv4vibe');
   await (await dl).saveAs(file);
   const j = JSON.parse(fs.readFileSync(file, 'utf8'));
-  ok(j.identifier === 'novelai-vibe-transfer' && Object.keys(j.encodings.v5full).length === 2 && j.importInfo.strength === 0.8, '导出官方格式，两份编码都在');
+  ok(j.identifier === 'novelai-vibe-transfer' && Object.keys(j.encodings['v4-5curated']).length === 2 && j.importInfo.strength === 0.8, '导出官方格式，两份编码都在');
   // 官网导出的那种：没原图、只有 v4-5full 编码
   const offi = { identifier: 'novelai-vibe-transfer', version: 1, type: 'encoding', name: '官网的', encodings: { 'v4-5full': { abc: { encoding: 'QUJD', params: { information_extracted: 0.7 } } } }, importInfo: { strength: 0.4 } };
   fs.writeFileSync(path.join(tmp, 'official.naiv4vibe'), JSON.stringify(offi));
-  chooser = page.waitForEvent('filechooser');
   await page.click('#c-vibes [data-a="add"]');
+  chooser = page.waitForEvent('filechooser');
+  await page.click('[data-src="phone"]');
   await (await chooser).setFiles(path.join(tmp, 'official.naiv4vibe'));
   await page.waitForFunction(() => document.querySelectorAll('.vibe-item').length === 2);
   ok(await page.evaluate(() => { const v = UI.settings.nai.vibes[1]; return v.name === '官网的' && v.strength === 0.4 && v.info === 0.7; }), '导入官网 .naiv4vibe：名字、强度、信息提取量');
-  ok((await page.textContent('.vibe-item[data-i="1"] [data-st]')).includes('没有 V5 Full 的编码'), '没有当前模型编码时提示');
+  ok((await page.textContent('.vibe-item[data-i="1"] [data-st]')).includes('没有 V4.5 Curated 的编码'), '没有当前模型编码时提示');
   await page.click('#c-draw');
   await page.waitForTimeout(500);
   ok(await page.evaluate(() => Queue.state().failed) >= 1, '缺编码又没原图时出图失败并提示');
@@ -165,21 +207,76 @@ const tmp = fs.mkdtempSync(path.join(OUT, 'vibe-'));
   p = bodies[bodies.length - 1].parameters;
   ok(bodies.length > nb && p.reference_image_multiple_cached[0].data === 'QUJD' && p.reference_strength_multiple[0] === 0.4, '换到 V4.5 能用导入的编码');
   await page.screenshot({ path: OUT + '/画风参考.png', fullPage: true });
+  // V5：不编码也不发，卡片上说明
+  await page.evaluate(() => { UI.settings.nai.model = 'nai-diffusion-5-full'; UI.settings.nai.vibes.forEach((v) => { v.on = true; }); CreatePage.refresh(); });
+  const v5v = await page.evaluate(async () => { await Vibes.prepare(UI.settings.nai); return Nai.buildBody(UI.settings.nai, { tag: 'x' }).body.parameters; });
+  ok(v5v.reference_image_multiple_cached.length === 0 && (await page.textContent('#c-vibes [data-st]')).includes('V5 官方不支持'), 'V5 下参考图不发不编码，卡片上说明');
+  await page.evaluate(() => { UI.settings.nai.model = 'nai-diffusion-4-5-full'; UI.settings.nai.vibes[0].on = false; CreatePage.refresh(); });
+
+  // ---------- 角色参考（精准参考） ----------
+  ok((await page.textContent('#c-dirrefs')).includes('每张 +5 Anlas'), '角色参考卡片标了 +5 Anlas');
+  await page.click('#c-dirrefs [data-a="add"]');
+  chooser = page.waitForEvent('filechooser');
+  await page.click('[data-src="phone"]');
+  await (await chooser).setFiles(img);
+  await page.waitForSelector('#c-dirrefs .vibe-item');
+  ok(await page.evaluate(async () => { const d = await DirectorRef.load(UI.settings.nai.dirRefs[0].id); return d.width === 1472 && d.height === 1472; }), '方图补成 1472×1472');
+  await page.click('#c-dirrefs [data-type="style"]');
+  await page.$eval('#c-dirrefs [data-f="fidelity"]', (el) => { el.value = '0.3'; el.dispatchEvent(new Event('input', { bubbles: true })); });
+  await page.$eval('#c-dirrefs [data-f="strength"]', (el) => { el.value = '0.75'; el.dispatchEvent(new Event('input', { bubbles: true })); });
+  await page.evaluate(() => { UI.settings.nai.vibes.forEach((v) => { v.on = true; }); });
+  // 从图库再选一张
+  await page.click('#c-dirrefs [data-a="add"]');
+  await page.click('[data-src="gallery"]');
+  await page.waitForSelector('.sheet .thumb');
+  await page.click('.sheet .thumb');
+  await page.waitForFunction(() => document.querySelectorAll('#c-dirrefs .vibe-item').length === 2);
+  ok(await page.evaluate(() => UI.settings.nai.dirRefs[1].name.startsWith('图库')), '能从 App 图库选图当参考');
+  await page.click('#c-dirrefs .vibe-item[data-i="1"] .switch'); await page.waitForTimeout(50);
+  ok((await page.textContent('#c-dirrefs')).includes('画风参考图（Vibe）会暂停') && (await page.textContent('#c-vibes [data-st]')).includes('正在用角色参考'), '开着角色参考时提示 Vibe 暂停');
+  const ne = encodes.length, nd = bodies.length;
+  await page.click('#c-draw');
+  for (let i = 0; i < 30 && bodies.length === nd; i++) await page.waitForTimeout(100);
+  p = bodies[bodies.length - 1].parameters;
+  ok(p.director_reference_images.length === 1 && p.director_reference_descriptions[0].caption.base_caption === 'style'
+    && p.director_reference_strength_values[0] === 0.75 && p.director_reference_secondary_strength_values[0] === 0.7 && p.director_reference_information_extracted[0] === 1,
+    '出图带上角色参考：类型、强度、1-保真度');
+  ok(p.reference_image_multiple_cached.length === 0 && encodes.length === ne, '开着角色参考时 Vibe 不发也不编码');
+  await page.waitForTimeout(400);
+  const dmeta = await page.evaluate(async () => (await Gallery.list())[0].meta.dirRefs);
+  ok(dmeta && dmeta[0].type === 'style' && dmeta[0].fidelity === 0.3, '配方记下角色参考');
+  const est = await page.evaluate(() => Cost.estimate(UI.settings.nai, { size: 'portrait' }, 2));
+  const dpart = est.parts.find((x) => x.label === '角色参考');
+  ok(dpart && dpart.anlas === 10 && !est.parts.some((x) => x.label === '画风参考图'), '出图预估：开着的一张角色参考 × 两张图 = +10 Anlas，Vibe 暂停不算：' + JSON.stringify(est.parts));
+  // V5 不发
+  const v5d = await page.evaluate(() => Nai.buildBody(Object.assign({}, UI.settings.nai, { model: 'nai-diffusion-5-full' }), { tag: 'x' }).body.parameters);
+  ok(!v5d.director_reference_images, 'V5 不发角色参考');
+  await page.screenshot({ path: OUT + '/角色参考.png' });
 
   // 重开：角色、参考图都还在
   await page.evaluate(() => Characters.set([{ tag: 'girl, cat ears', negative: '', pos: '' }]));
   await page.waitForTimeout(500);
   await page.reload();
-  await page.waitForSelector('.vibe-item');
-  ok((await page.$$('.vibe-item')).length === 2 && (await page.$$('.vibe-thumb[src]')).length >= 1, '重开后参考图和缩略图都在');
+  await page.waitForSelector('#c-vibes .vibe-item');
+  ok((await page.$$('#c-vibes .vibe-item')).length === 2 && (await page.$$('#c-vibes .vibe-thumb[src]')).length >= 1 && (await page.$$('#c-dirrefs .vibe-item')).length === 2, '重开后参考图、角色参考和缩略图都在');
   ok(await page.inputValue('.char-item [data-f="tag"]') === 'girl, cat ears', '重开后角色还在');
   // 删除参考图连数据一起删
   page.once('dialog', () => {});
-  await page.click('.vibe-item[data-i="0"] [data-a="del"]');
+  await page.click('#c-vibes .vibe-item[data-i="0"] [data-a="del"]');
   await page.click('#layers [data-yes]');
   await page.waitForTimeout(300);
   const keys = await page.evaluate(() => Store.keys());
   ok(keys.filter((k) => String(k).startsWith('vibe:')).length === 1, '删除参考图连图和编码一起删');
+
+  // 参数预设用的整份导出：关着的角色和互动都能还原
+  ok(await page.evaluate(() => {
+    Characters.set([{ tag: 'a', acts: ['source#hug'] }, { tag: 'b', on: false, acts: ['target#hug'] }]);
+    const out = Characters.exportList();
+    Characters.set([]);
+    Characters.set(out);
+    const c = Characters.get(), a = Characters.getActs();
+    return c.length === 2 && c[1].on === false && a.length === 1 && a[0].a === c[0].id && a[0].b === c[1].id;
+  }), '整份导出再导入：关着的角色、互动都还在');
 
   await browser.close();
   srv.close();
