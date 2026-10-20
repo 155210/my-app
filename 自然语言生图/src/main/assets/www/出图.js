@@ -30,12 +30,17 @@
      */
     function fullPrompts(nai, p) {
         const st = activeStyle(nai) || {};
-        let positive = joinTags(st.prefix, p.tag, st.suffix, Params.qualityOf(nai));
+        const tag = tagFilters.reduce((t, fn) => fn(t, nai, p) || t, p.tag || '');
+        let positive = joinTags(st.prefix, tag, st.suffix, Params.qualityOf(nai));
         const nl = String(p.nl || '').trim();
         if (nai.naturalLanguage && Params.supportsNl(nai.model) && nl) positive += '. ' + nl;
         const negative = joinTags(Params.negativeOf(nai), st.negative, p.negative);
         return { positive, negative };
     }
+
+    // 扩展口：出图前改画面标签，Nai.addTagFilter(fn)，fn(标签串, nai, p) 返回新的（角色库把角色名换成外貌）
+    const tagFilters = [];
+    const addTagFilter = (fn) => tagFilters.push(fn);
 
     // 扩展口：多角色、Vibe 等功能各自在自己的文件里 Nai.addHook(fn)，
     // fn(params, nai, p) 直接改 parameters，不用改这个文件
@@ -251,5 +256,5 @@
     // lastSeed：最近出的一张的种子（锁定种子用）
     const state = { lastSeed: 0 };
 
-    window.Nai = { generate, test, subscription, usageText, buildBody, fullPrompts, activeStyle, unzipFirstImage, endpoint, addHook, state };
+    window.Nai = { generate, test, subscription, usageText, buildBody, fullPrompts, activeStyle, unzipFirstImage, endpoint, addHook, addTagFilter, state };
 })();
