@@ -65,6 +65,8 @@ PR 上也会打包，但只放在 Actions 的附件里，不发 Release。
         ├── 标签库.js             【标签库】中英对照、搜索、点一下加进提示词；给 AI 参考标签、写完纠错
         ├── 主题.js               主题配色：8 套预设 + 自定义（背景/文字/强调色推出整套 CSS 变量），存 Store 'theme'，设置页「主题」
         ├── 图库角色.js           图库按角色筛选 / 搜索：从配方认出角色库的角色、Danbooru 角色和作品标签（中文名）
+        ├── 图生图.js             【图生图与编辑】编辑页（图生图 / 局部重绘涂遮罩 / 精修放大含 V5 MAX）、创作页「底图」卡片、编辑类花费预估
+        ├── 图像工具.js           【图生图与编辑】官方 4 倍放大、6 个图像工具（去背景、线稿、草图、上色、换表情 24 种、去杂物）、前后对比滑块、大图快捷按钮
         ├── 角色库.js             【角色库】存固定外貌、名字换外貌标签、AI 自动建档和永久变化、全局角色（AI 不改）
         ├── 角色生成.js           【角色系统】AI 一句话生成角色外貌 + 初始衣柜（填进编辑页，保存才入库）
         ├── 衣柜.js               【角色系统】每个角色多套衣服、每件穿脱状态、里层被外层挡住不写（照 NAIWeaver 改写）
@@ -80,6 +82,8 @@ PR 上也会打包，但只放在 Actions 的附件里，不发 Release。
 
 ### 扩展口（新功能尽量加新文件，少改现有文件）
 
+- `Nai.addBodyHook(fn)`：`fn(body, nai设置, 本次提示词)`，改 parameters 以外的部分（`action`、`model`、`input`）。图生图 / 局部重绘用它。
+- `GalleryPage.addViewerAction({ id, label, icon, show, decorate, run })`：大图下面第二排快捷按钮；`decorate(按钮, 图)` 用来挂花费。
 - `Nai.addTagFilter(fn)`：`fn(画面标签串, nai设置, 本次提示词)` 返回新的标签串，拼正面之前执行（预览、配方里看到的也是改过的）。角色库用它把名字换成外貌。
 - `Nai.addHook(fn)`：`fn(parameters, nai设置, 本次提示词, extra)`，出图请求发出前改参数，往 `extra` 里放的会记进配方。多角色、Vibe、角色库用它。
 - `Writer.addContext(fn)`：`fn(设置, 中文描述)` 返回一段参考文字，附在发给 AI 的消息后面。角色库、标签库候选用它。
@@ -98,6 +102,20 @@ PR 上也会打包，但只放在 Actions 的附件里，不发 Release。
 - 角色列表存在 `charSlots` 键（像草稿一样跟着创作页走；以前存在 `characters`，和角色库撞键，打开时自动搬）：`[{ id, on, tag, negative, pos }]`，最多 6 个。出图时写进 `v4_prompt` / `v4_negative_prompt` 的 `char_captions`，另发一份 `characterPrompts`；1girl/1boy 换成 girl/boy；选了站位就开 `use_coords`。V3 忽略。配方记 `meta.characters`，「重绘」「用这套重画」按那张图的角色来。角色库的 `Nai.addHook` 会把角色格子里整项是角色名的换成外貌。
 - 参考图索引在 `nai.vibes`（`{ id, name, on, strength, info }`），图和编码在 `vibe:<id>`（`{ image, thumb, enc: [{ key, info, data }] }`，进备份）。V4 起出图前（包了一层 `Nai.generate`）缺哪个模型 / 信息提取量的编码就调 `/ai/encode-vibe` 补上（官方每次扣 2 Anlas，同一张排了几张只编一次），放进 `reference_image_multiple_cached`；V3 直接发原图。配方记 `meta.vibes`。
 - `Nai.addHook(fn)` 的 `fn` 有第 4 个参数 `extra`：往里放的东西合进这张图的 `meta`。
+
+## 图生图与编辑
+
+- 入口：大图下面第二排「编辑 / 精修 / 放大 / 去背景 / 工具」，每个按钮下面小字是预估 Anlas；处理出来的图多一个「对比原图」。「工具」里是全部 10 项（图生图、局部重绘、精修、放大、6 个图像工具），每行右边标花费。
+- 编辑页（`ImgEdit.openEditor(图, 'img2img'|'infill'|'enhance')`）：
+  - 图生图：`action: 'img2img'`，`parameters.image` = 原图按原尺寸（64 的倍数、不超过 314 万像素）转 PNG，`strength`（默认 0.7）、`noise`、`extra_noise_seed` = 种子。提示词可改，照常拼画风、质量词。
+  - 局部重绘：手指涂（涂 / 擦 / 笔刷大小 / 撤销 / 清空），遮罩按 8×8 格对齐、黑底白涂；`action: 'infill'`，模型换成 `xxx-inpainting`（V5 Curated 借 `nai-diffusion-4-5-curated-inpainting`，同官网），`strength` 默认 1。
+  - 精修：原图放大 1 / 1.5 / 2 倍（不超上限的才给选）再图生图，强度默认 0.5；照原图配方里实际发送的正负面原样发（`i2i.raw`），不套画风参考。V5 多一个 MAX：按原尺寸发 + `upscaled_enhance: true`，服务器放大。
+- 创作页「底图」卡片：从图库挑一张，开着时「出图」就变成图生图（按底图尺寸，竖图/横图不管用），存在 `i2iBase` 键；排队时只记 id（`p.i2iRef`），真出图前才读图。图生图出的图点「重绘」照原底图再来。
+- 放大：`POST /ai/upscale { image, width, height, scale }`，4 倍超过每边 4096 就 2 倍；官方站走 `api.novelai.net`，不行再试 `image.novelai.net`。
+- 图像工具：`POST /ai/augment-image { req_type, width, height, image, prompt?, defry? }`。换表情 prompt = `表情;;补充`，上色 prompt = 颜色说明，`defry` 0~5（越大越接近原图）。
+- 结果都存进图库，配方 `meta.edit = { kind, label, from, strength, … }`；做完自动打开前后对比（左右拖分界线），`from` 那张还在时大图有「对比原图」。
+- 花费：有 `window.Cost`（计价.js）就用它的 `enhance / upscale / tool / label / tag`，没有就用 `ImgEdit.Price` 的兜底公式（同 NAIWeaver 的 nai_cost_estimator；放大、图像工具的价目是估的）。
+- 测试：`测试/图生图测试.js`（`SHOT=目录` 时顺便截图）。
 
 ## 图片里的出图信息
 

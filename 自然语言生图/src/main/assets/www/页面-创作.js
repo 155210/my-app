@@ -119,7 +119,7 @@
         on('#c-size', 'click', (e) => { const b = e.target.closest('button'); if (!b) return; draft.size = b.dataset.v; saveDraft(); refresh(); });
         on('#c-write', 'click', () => (writing ? writing.abort() : write()));
         on('#c-count', 'change', (e) => { draft.count = Number(e.target.value) || 1; saveDraft(); });
-        on('#c-draw', 'click', () => draw());
+        on('#c-draw', 'click', () => CreatePage.draw()); // 走 CreatePage 上的，别的文件（底图）能包一层
         on('#c-queue', 'click', () => Queue.openPanel());
         on('#c-cancel', 'click', () => Queue.cancelAll());
         on('#c-preview', 'click', preview);
@@ -270,7 +270,7 @@
             card.querySelector('.acts').onclick = async (e) => {
                 const b = e.target.closest('button'); if (!b) return;
                 if (b.dataset.a === 'view') GalleryPage.openViewer(item.id);
-                if (b.dataset.a === 'again') redraw(item);
+                if (b.dataset.a === 'again') CreatePage.redraw(item);
                 if (b.dataset.a === 'save') {
                     try { toast('success', await Gallery.saveToPhone(item), '已保存'); } catch (err) { toast('error', err.message, '保存失败'); }
                 }

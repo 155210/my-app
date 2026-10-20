@@ -652,9 +652,15 @@
     // ------------------------------------------------------------
     // 大图
     // ------------------------------------------------------------
+    // 扩展口：大图下面第二排快捷按钮（编辑、去背景、放大…），
+    // GalleryPage.addViewerAction({ id, label, icon, show(item) 要不要显示, decorate(按钮, item) 挂花费, run(item, { close }) })
+    const viewerActs = [];
+    const addViewerAction = (a) => { const i = viewerActs.findIndex((x) => x.id === a.id); if (i >= 0) viewerActs[i] = a; else viewerActs.push(a); };
+
     async function openViewer(id, ids) {
         const master = await Gallery.list();
-        const items = ids ? master.filter((x) => ids.includes(x.id)) : master;
+        // 拷一份：看大图时新出的图（编辑、放大）插到图库最前面，不能把这里的顺序挤乱
+        const items = ids ? master.filter((x) => ids.includes(x.id)) : master.slice();
         let idx = items.findIndex((x) => x.id === id);
         if (idx < 0) return;
         let url = '';
@@ -666,7 +672,8 @@
             + '<button data-a="recipe">' + ICON_INFO + '配方</button>'
             + '<button data-a="reuse">' + UI.ICON.reuse + '用这套重画</button>'
             + '<button data-a="copy">' + UI.ICON.copy + '复制正面</button>'
-            + '<button data-a="del" class="danger">' + UI.ICON.del + '删除</button></div></div>',
+            + '<button data-a="del" class="danger">' + UI.ICON.del + '删除</button></div>'
+            + '<div class="acts big v-quick" data-quick hidden></div></div>',
         { onClose: () => { if (url) URL.revokeObjectURL(url); document.removeEventListener('keydown', onKey); } });
         const stage = $('.v-stage', L.box), img = $('[data-img]', L.box);
         const cur = () => items[idx];
@@ -705,6 +712,15 @@
             url = blob ? URL.createObjectURL(blob) : '';
             img.src = url || item.thumb || '';
             resetZ(false);
+            quick(item);
+        }
+
+        function quick(item) {
+            const q = $('[data-quick]', L.box);
+            const acts = viewerActs.filter((a) => !a.show || a.show(item));
+            q.hidden = !acts.length;
+            q.innerHTML = acts.map((a) => '<button data-q="' + esc(a.id) + '">' + (a.icon || '') + esc(a.label) + '</button>').join('');
+            acts.forEach((a) => { if (a.decorate) a.decorate($('[data-q="' + a.id + '"]', q), item); });
         }
 
         /** 换到上一张(-1) / 下一张(1)，带滑动动画；到头了弹回去 */
@@ -851,6 +867,12 @@
             refresh();
         };
 
+        $('[data-quick]', L.box).onclick = (e) => {
+            const b = e.target.closest('[data-q]'); if (!b) return;
+            const a = viewerActs.find((x) => x.id === b.dataset.q);
+            if (a) a.run(cur(), { close });
+        };
+
         $('.acts', L.box).onclick = async (e) => {
             const b = e.target.closest('button'); if (!b) return;
             const a = b.dataset.a, item = cur();
@@ -860,7 +882,7 @@
             else if (a === 'reuse') { close(); CreatePage.reuse(item); }
             else if (a === 'del') {
                 if (!await confirmDelete(item)) return;
-                if (items !== master) { const k = items.indexOf(item); if (k >= 0) items.splice(k, 1); }
+                { const k = items.indexOf(item); if (k >= 0) items.splice(k, 1); }
                 refresh();
                 if (!items.length) { close(); return; }
                 load(Math.min(idx, items.length - 1));
@@ -870,5 +892,5 @@
         await load(idx);
     }
 
-    window.GalleryPage = { refresh, openViewer, openRecipe, showInfo, startSelect };
+    window.GalleryPage = { refresh, openViewer, openRecipe, showInfo, startSelect, addViewerAction };
 })();
