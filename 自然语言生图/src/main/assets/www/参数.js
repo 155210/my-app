@@ -2,7 +2,7 @@
  * 参数.js —— 出图参数：模型表、各模型默认质量词 / 负面词、采样器、尺寸、默认设置
  *
  * 质量词、负面词与「柏宝绘」同口径（NAI 官方推荐值）。设置里留空 = 用这里的模型默认值。
- * 以后加 V4 / V3、尺寸预设、多张出图等，都改这个文件。
+ * 模型 V5 / V4.5 / V4 / V3；尺寸预设；画风模板默认值（模板逻辑见 风格.js）。
  */
 (function () {
     'use strict';
@@ -12,6 +12,9 @@
         { value: 'nai-diffusion-5-curated', label: 'V5 Curated（有内容过滤）' },
         { value: 'nai-diffusion-4-5-full', label: 'V4.5 Full（无过滤）' },
         { value: 'nai-diffusion-4-5-curated', label: 'V4.5 Curated（有内容过滤）' },
+        { value: 'nai-diffusion-4-full', label: 'V4 Full（只认标签）' },
+        { value: 'nai-diffusion-4-curated-preview', label: 'V4 Curated（只认标签，有过滤）' },
+        { value: 'nai-diffusion-3', label: 'V3（老模型，只认标签）' },
     ];
 
     const QUALITY = {
@@ -19,6 +22,9 @@
         'nai-diffusion-5-curated': 'very aesthetic, masterpiece, no text',
         'nai-diffusion-4-5-full': 'location, very aesthetic, masterpiece, no text',
         'nai-diffusion-4-5-curated': 'location, masterpiece, no text, -0.8::feet::, rating:general',
+        'nai-diffusion-4-full': 'no text, best quality, very aesthetic, absurdres',
+        'nai-diffusion-4-curated-preview': 'rating:general, best quality, very aesthetic, absurdres',
+        'nai-diffusion-3': 'best quality, amazing quality, very aesthetic, absurdres',
     };
 
     const NEGATIVE = {
@@ -30,6 +36,12 @@
             'lowres, artistic error, film grain, scan artifacts, worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, dithering, halftone, screentone, multiple views, logo, too many watermarks, negative space, blank page',
         'nai-diffusion-4-5-curated':
             'blurry, lowres, upscaled, artistic error, film grain, scan artifacts, worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, halftone, multiple views, logo, too many watermarks, negative space, blank page',
+        'nai-diffusion-4-full':
+            'blurry, lowres, error, film grain, scan artifacts, worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, multiple views, logo, too many watermarks, white blank page, blank page',
+        'nai-diffusion-4-curated-preview':
+            'blurry, lowres, error, film grain, scan artifacts, worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, logo, dated, signature, multiple views, gigantic breasts, white blank page, blank page',
+        'nai-diffusion-3':
+            'lowres, {bad}, error, fewer, extra, missing, worst quality, jpeg artifacts, bad quality, watermark, unfinished, displeasing, chromatic aberration, signature, extra digits, artistic error, username, scan, [abstract]',
     };
 
     const SAMPLERS = [
@@ -39,6 +51,7 @@
         { value: 'k_dpmpp_2m', label: 'DPM++ 2M' },
         { value: 'k_dpmpp_2m_sde', label: 'DPM++ 2M SDE' },
         { value: 'k_dpmpp_sde', label: 'DPM++ SDE' },
+        { value: 'ddim_v3', label: 'DDIM V3（V5 不支持）' },
     ];
 
     const NOISE = [
@@ -46,6 +59,32 @@
         { value: 'native', label: 'Native' },
         { value: 'exponential', label: 'Exponential' },
         { value: 'polyexponential', label: 'Polyexponential' },
+    ];
+
+    /** 尺寸预设：free = Opus 会员不扣 Anlas（≤ 1024×1024 像素、≤ 28 步、一次一张）；标签里的「标准 / 小」也是这个意思 */
+    const SIZES = [
+        { value: '832×1216', label: '竖 832×1216（标准）', free: true },
+        { value: '1216×832', label: '横 1216×832（标准）', free: true },
+        { value: '1024×1024', label: '方 1024×1024（标准）', free: true },
+        { value: '1024×1536', label: '竖 1024×1536（大）' },
+        { value: '1536×1024', label: '横 1536×1024（大）' },
+        { value: '1472×1472', label: '方 1472×1472（大）' },
+        { value: '1088×1920', label: '竖 1088×1920（壁纸）' },
+        { value: '1920×1088', label: '横 1920×1088（壁纸）' },
+        { value: '512×768', label: '竖 512×768（小）', free: true },
+        { value: '768×512', label: '横 768×512（小）', free: true },
+        { value: '640×640', label: '方 640×640（小）', free: true },
+    ];
+
+    /** 内置画风模板（来自柏宝绘的默认画师串）；可改可删，删光了就是「不用模板」 */
+    const DEFAULT_STYLES = [
+        {
+            id: 'st_default',
+            name: '柏宝绘默认画师串',
+            prefix: '0.8::nnmbpx::,0.8::artist:yalmyu::,0.1::smilesmile1312,::,  artist:sh_(shinh), 0.4::chen bin::,0.4::dayama::,healthyman,bacheally,',
+            suffix: '',
+            negative: '',
+        },
     ];
 
     const NAI_OFFICIAL = 'https://image.novelai.net';
@@ -65,28 +104,46 @@
             varietyBoost: true,
             portraitSize: '832×1216',
             landscapeSize: '1216×832',
-            artist: '',         // 画师串：拼在正面提示词最前
+            artist: '',         // 旧版的画师串，打开时自动搬进画风模板
+            styles: DEFAULT_STYLES, // 画风模板：{ id, name, prefix 前缀, suffix 后缀, negative 负面 }
+            styleId: 'st_default',  // 当前用的模板，'' = 不用
             quality: '',        // 留空 = 模型默认
             negative: '',       // 留空 = 模型默认
             naturalLanguage: true,
         },
         prompts: { system: '' }, // 留空 = 内置规范（见 写词.js）
         autoDraw: true,          // 写完提示词自动出图
+        tags: { hint: true, fix: true }, // 标签库：给 AI 参考标签、写完纠错（见 标签库.js）
     };
 
     /** 合并存储里的设置和默认值（新版本加的字段自动补上） */
     function normalize(s) {
         s = s || {};
+        const nai = Object.assign({}, DEFAULTS.nai, s.nai);
+        nai.styles = (Array.isArray(nai.styles) ? nai.styles : []).map((x) => Object.assign({ id: '', name: '', prefix: '', suffix: '', negative: '' }, x));
+        // 旧版只有一格画师串：搬成一套模板并选中
+        if (String(nai.artist || '').trim()) {
+            const id = 'st_' + Date.now().toString(36);
+            nai.styles = [{ id, name: '我的画师串', prefix: nai.artist.trim(), suffix: '', negative: '' }].concat(nai.styles);
+            nai.styleId = id;
+        }
+        nai.artist = '';
+        if (nai.styleId && !nai.styles.some((x) => x.id === nai.styleId)) nai.styleId = '';
+        if (!MODELS.some((m) => m.value === nai.model)) nai.model = DEFAULTS.nai.model;
         return {
             ai: Object.assign({}, DEFAULTS.ai, s.ai),
-            nai: Object.assign({}, DEFAULTS.nai, s.nai),
+            nai,
             prompts: Object.assign({}, DEFAULTS.prompts, s.prompts),
             autoDraw: s.autoDraw === undefined ? DEFAULTS.autoDraw : !!s.autoDraw,
+            tags: Object.assign({}, DEFAULTS.tags, s.tags),
         };
     }
 
     const isV5 = (m) => String(m).includes('nai-diffusion-5');
     const isV45 = (m) => String(m).includes('nai-diffusion-4-5');
+    const isV3 = (m) => String(m) === 'nai-diffusion-3';
+    /** 这个模型能用的采样器（V5 没有 DDIM） */
+    const samplersFor = (m) => (isV5(m) ? SAMPLERS.filter((x) => x.value !== 'ddim_v3') : SAMPLERS);
     /** 4.5 / V5 才吃英文自然语言描述 */
     const supportsNl = (m) => isV5(m) || isV45(m);
 
@@ -109,7 +166,7 @@
     }
 
     window.Params = {
-        MODELS, QUALITY, NEGATIVE, SAMPLERS, NOISE, NAI_OFFICIAL, DEFAULTS,
-        normalize, isV5, isV45, supportsNl, qualityOf, negativeOf, parseSize, modelLabel,
+        MODELS, QUALITY, NEGATIVE, SAMPLERS, NOISE, SIZES, DEFAULT_STYLES, NAI_OFFICIAL, DEFAULTS,
+        normalize, isV5, isV45, isV3, samplersFor, supportsNl, qualityOf, negativeOf, parseSize, modelLabel,
     };
 })();

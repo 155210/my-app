@@ -49,7 +49,9 @@ const fails = []; const ok = (c, m) => { if (!c) fails.push(m); console.log((c ?
   await page.route('https://nai.test/**', async (r) => {
     const req = r.request();
     if (req.method() === 'OPTIONS') return r.fulfill({ status: 204, headers: CORS });
-    naiBody = JSON.parse(req.postData());
+    const b = JSON.parse(req.postData() || 'null');
+    if (!b || !b.input) return r.fulfill({ headers: { ...CORS, 'content-type': 'application/json' }, body: '{}' });
+    naiBody = b;
     return r.fulfill({ headers: { ...CORS, 'content-type': 'application/x-zip-compressed' }, body: zip('image_0.png', png(64, 96, { Title: 'NovelAI generated image', Software: 'NovelAI', Source: 'NovelAI Diffusion V4.5 4BDE2A90', Comment: JSON.stringify({ prompt: naiBody.input, uc: naiBody.parameters.negative_prompt, seed: 4242, steps: 28, scale: 5.5, sampler: 'k_euler', width: 1216, height: 832, v4_prompt: { caption: { base_caption: naiBody.input, char_captions: [{ char_caption: 'girl, 黑发', centers: [] }] } } }) }), 8) });
   });
 

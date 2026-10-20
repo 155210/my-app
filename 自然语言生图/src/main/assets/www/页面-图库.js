@@ -159,12 +159,13 @@
     // ------------------------------------------------------------
     // 完整配方
     // ------------------------------------------------------------
-    const KNOWN = ['positive', 'negative', 'width', 'height', 'seed', 'model', 'sampler', 'steps', 'scale', 'size', 'cfgRescale', 'noiseSchedule'];
+    const KNOWN = ['positive', 'negative', 'width', 'height', 'seed', 'model', 'sampler', 'steps', 'scale', 'size', 'cfgRescale', 'noiseSchedule', 'style'];
 
     function recipeText(item) {
         const m = item.meta || {};
         const rows = [
             ['模型', Params.modelLabel(m.model)],
+            ['画风模板', m.style],
             ['尺寸', m.width && m.height ? m.width + '×' + m.height : ''],
             ['画幅', { portrait: '竖图', landscape: '横图', square: '方图' }[m.size] || m.size],
             ['种子', m.seed],
@@ -231,22 +232,22 @@
         showInfo(blob, Gallery.fileName(item));
     }
 
-    /** 把读出来的提示词拆回创作页的格式：去掉画师串、质量词、模型默认负面词，免得重画时又叠一遍 */
+    /** 把读出来的提示词拆回创作页的格式：去掉当前画风的前缀 / 后缀 / 负面、质量词、模型默认负面词，免得重画时又叠一遍 */
     function toDraft(info) {
         const nai = UI.settings.nai;
+        const st = (Nai.activeStyle && Nai.activeStyle(nai)) || {};
+        const clean = (x) => String(x || '').trim().replace(/^,+|,+$/g, '').trim();
+        const cutHead = (t, h) => (h && t.startsWith(h) ? t.slice(h.length).replace(/^\s*,\s*/, '') : t);
+        const cutTail = (t, h) => (h && t.endsWith(h) ? t.slice(0, t.length - h.length).replace(/\s*,\s*$/, '') : t);
         let tag = info.prompt.trim(), nl = '';
-        const artist = (nai.artist || '').trim();
-        if (artist && tag.startsWith(artist + ', ')) tag = tag.slice(artist.length + 2);
-        const q = Params.qualityOf(nai);
-        const qi = q ? tag.lastIndexOf(', ' + q) : -1;
+        const q = clean(Params.qualityOf(nai));
+        const qi = q ? tag.lastIndexOf(q) : -1;
         if (qi >= 0) {
-            const rest = tag.slice(qi + 2 + q.length);
-            tag = tag.slice(0, qi);
-            if (rest.startsWith('. ')) nl = rest.slice(2);
+            const rest = tag.slice(qi + q.length);
+            if (!rest || rest.startsWith('. ')) { nl = rest.slice(2); tag = tag.slice(0, qi).replace(/\s*,\s*$/, ''); }
         }
-        let neg = info.negative.trim();
-        const d = Params.negativeOf(nai);
-        if (d && neg.startsWith(d)) neg = neg.slice(d.length).replace(/^\s*,\s*/, '');
+        tag = cutTail(cutHead(tag, clean(st.prefix)), clean(st.suffix));
+        let neg = cutHead(cutHead(info.negative.trim(), clean(Params.negativeOf(nai))), clean(st.negative));
         const p = info.params;
         return { desc: '', tag, nl, extraNegative: neg, meta: { size: p.width > p.height ? 'landscape' : 'portrait' } };
     }

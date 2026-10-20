@@ -39,6 +39,9 @@
     // 扩展口：角色库、标签库等 Writer.addContext(fn)，fn(settings, text) 返回要附加给 AI 的参考文字（可空）
     const contexts = [];
     const addContext = (fn) => contexts.push(fn);
+    // 扩展口：AI 写完后改结果，Writer.addFilter(fn)，fn(结果, settings) 返回新结果（标签库纠错用）
+    const filters = [];
+    const addFilter = (fn) => filters.push(fn);
 
     function buildMessages(settings, text, extra) {
         const nlOn = settings.nai.naturalLanguage && Params.supportsNl(settings.nai.model);
@@ -93,15 +96,18 @@
                 signal: opt.signal,
                 onDelta: (c) => opt.onDelta && opt.onDelta(c),
             });
+            let res;
             try {
-                return Object.assign(parseReply(r.content), { raw: r.content });
+                res = Object.assign(parseReply(r.content), { raw: r.content });
             } catch (e) {
                 lastErr = e;
                 hint = '（上次你的回复格式不对：' + e.message + '。这次只输出一段 JSON，不要别的内容。）';
+                continue;
             }
+            return filters.reduce((x, fn) => fn(x, settings) || x, res);
         }
         throw new Error(lastErr.message + '（已自动重试）');
     }
 
-    window.Writer = { DEFAULT_SPEC, run, parseReply, buildMessages, addContext };
+    window.Writer = { DEFAULT_SPEC, run, parseReply, buildMessages, addContext, addFilter };
 })();

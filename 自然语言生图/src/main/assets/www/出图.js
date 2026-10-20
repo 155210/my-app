@@ -4,8 +4,9 @@
  * 请求格式照「柏宝绘」的 backends/nai.ts：
  *   POST {地址}/ai/generate-image，body { input, model, action:'generate', parameters }
  *   返回 zip，取第一张图。
- * 正面 = 画师串, 画面 tag, 质量词（4.5/V5 开了自然语言再接 ". 英文描述"）
- * 负面 = 设置里的负面词（留空用模型默认）, AI 补的负面词
+ * 正面 = 画风前缀, 画面 tag, 画风后缀, 质量词（4.5/V5 开了自然语言再接 ". 英文描述"）
+ * 负面 = 设置里的负面词（留空用模型默认）, 画风负面, AI 补的负面词
+ * V3 不认 v4_prompt 那套结构，只读 input。
  */
 (function () {
     'use strict';
@@ -18,6 +19,9 @@
         return base + '/ai/' + seg;
     }
 
+    /** 当前选中的画风模板，没选 → null */
+    const activeStyle = (nai) => (nai.styleId && (nai.styles || []).find((x) => x.id === nai.styleId)) || null;
+
     const joinTags = (...parts) => parts.map((s) => String(s || '').trim().replace(/^,+|,+$/g, '').trim()).filter(Boolean).join(', ');
 
     /**
@@ -25,10 +29,11 @@
      * p: { tag, nl, negative }  —— 创作页里可编辑的那几格
      */
     function fullPrompts(nai, p) {
-        let positive = joinTags(nai.artist, p.tag, Params.qualityOf(nai));
+        const st = activeStyle(nai) || {};
+        let positive = joinTags(st.prefix, p.tag, st.suffix, Params.qualityOf(nai));
         const nl = String(p.nl || '').trim();
         if (nai.naturalLanguage && Params.supportsNl(nai.model) && nl) positive += '. ' + nl;
-        const negative = joinTags(Params.negativeOf(nai), p.negative);
+        const negative = joinTags(Params.negativeOf(nai), st.negative, p.negative);
         return { positive, negative };
     }
 
@@ -50,7 +55,8 @@
         const skipCfg = nai.varietyBoost && !v5
             ? Math.pow((width * height) / 1011712, 0.5) * (Params.isV45(nai.model) ? 58 : 19)
             : null;
-        const sampler = nai.sampler || 'k_euler';
+        let sampler = nai.sampler || 'k_euler';
+        if (!Params.samplersFor(nai.model).some((x) => x.value === sampler)) sampler = 'k_euler_ancestral';
         const params = {
             params_version: v5 ? 4 : 3,
             width, height,
@@ -75,11 +81,17 @@
             reference_strength_multiple: [],
             normalize_reference_strength_multiple: true,
             use_coords: false,
-            reference_image_multiple_cached: [],
-            characterPrompts: [],
-            v4_prompt: { caption: { base_caption: positive, char_captions: [] }, use_coords: false, use_order: true },
-            v4_negative_prompt: { caption: { base_caption: negative, char_captions: [] }, legacy_uc: false },
         };
+        if (Params.isV3(nai.model)) {
+            Object.assign(params, { sm: false, sm_dyn: false, reference_image_multiple: [], reference_information_extracted_multiple: [] });
+        } else {
+            Object.assign(params, {
+                reference_image_multiple_cached: [],
+                characterPrompts: [],
+                v4_prompt: { caption: { base_caption: positive, char_captions: [] }, use_coords: false, use_order: true },
+                v4_negative_prompt: { caption: { base_caption: negative, char_captions: [] }, legacy_uc: false },
+            });
+        }
         hooks.forEach((h) => h(params, nai, p));
         if (sampler === 'k_euler_ancestral') {
             params.deliberate_euler_ancestral_bug = false;
@@ -87,7 +99,7 @@
         }
         return {
             body: { input: positive, model: nai.model, action: 'generate', parameters: params, use_new_shared_trial: true },
-            meta: { positive, negative, width, height, seed, model: nai.model, sampler, steps: params.steps, scale: params.scale, size: orientation },
+            meta: { positive, negative, width, height, seed, model: nai.model, sampler, steps: params.steps, scale: params.scale, size: orientation, style: (activeStyle(nai) || {}).name || '' },
         };
     }
 
@@ -162,25 +174,58 @@
         });
         if (!r.ok) throw await httpError(r, '出图失败');
         const { bytes, ext } = await unzipFirstImage(await r.arrayBuffer());
+        state.lastSeed = meta.seed;
+        // 出完一张：Anlas 余额等跟着刷新
+        window.dispatchEvent(new CustomEvent('nai-drawn', { detail: meta }));
         const type = ext === 'jpg' ? 'image/jpeg' : 'image/' + ext;
         return { blob: new Blob([bytes], { type }), ext, meta };
     }
 
-    /** 测试连接：官方站查订阅和 Anlas 余额；第三方站没有这个接口就只验证能连上 */
-    async function test(nai) {
+    /** 查订阅：返回 { tier, active, anlas }；站点没有这个接口 → null */
+    async function subscription(nai) {
         if (!String(nai.key || '').trim()) throw new Error('请先填 Key');
         const base = String(nai.url || '').trim().replace(/\/+$/, '');
         const official = /\/\/image\.novelai\.net$/i.test(base);
-        const url = official ? 'https://api.novelai.net/user/subscription' : endpoint(base, 'user/subscription');
-        const r = await fetch(url, { headers: { Authorization: 'Bearer ' + nai.key.trim() } });
-        if (r.status === 404) return '能连上，但这个站没有订阅接口；以实际出图为准';
-        if (!r.ok) throw await httpError(r, '连接失败');
+        // 官方 2026-08 起把订阅接口挪到了出图域名，老的 api.novelai.net 会回 400「update to the image URL」，留作后备
+        const urls = official
+            ? ['https://image.novelai.net/user/subscription', 'https://api.novelai.net/user/subscription']
+            : [base + '/user/subscription', endpoint(base, 'user/subscription')];
+        let r = null, err = null, missing = 0;
+        for (const url of urls) {
+            try {
+                r = await fetch(url, { headers: { Authorization: 'Bearer ' + nai.key.trim() } });
+            } catch (e) {
+                err = err || e;
+                r = null;
+                continue;
+            }
+            if (r.ok) break;
+            if (r.status === 404) missing++;
+            else if (!err || r.status === 401) err = await httpError(r, '连接失败');
+            r = null;
+        }
+        if (!r) {
+            if (err) throw err;
+            if (missing) return null;
+        }
         const d = await r.json().catch(() => ({}));
         const tier = ['免费', 'Tablet', 'Scroll', 'Opus'][Number(d.tier)] || ('等级 ' + d.tier);
-        const steps = d.trainingStepsLeft || {};
-        const anlas = (Number(steps.fixedTrainingStepsLeft) || 0) + (Number(steps.purchasedTrainingSteps) || 0);
-        return '连接正常：' + tier + (d.active === false ? '（订阅未激活）' : '') + '，Anlas 余额 ' + anlas;
+        const steps = d.trainingStepsLeft;
+        const anlas = typeof steps === 'number' ? steps
+            : (Number(steps && steps.fixedTrainingStepsLeft) || 0) + (Number(steps && steps.purchasedTrainingSteps) || 0);
+        return { tier, active: d.active !== false, anlas };
     }
 
-    window.Nai = { generate, test, buildBody, fullPrompts, unzipFirstImage, endpoint, addHook };
+    /** 测试连接：官方站查订阅和 Anlas 余额；第三方站没有这个接口就只验证能连上 */
+    async function test(nai) {
+        const d = await subscription(nai);
+        if (!d) return '能连上，但这个站没有订阅接口；以实际出图为准';
+        window.dispatchEvent(new CustomEvent('nai-anlas', { detail: d.anlas }));
+        return '连接正常：' + d.tier + (d.active ? '' : '（订阅未激活）') + '，Anlas 余额 ' + d.anlas;
+    }
+
+    // lastSeed：最近出的一张的种子（锁定种子用）
+    const state = { lastSeed: 0 };
+
+    window.Nai = { generate, test, subscription, buildBody, fullPrompts, activeStyle, unzipFirstImage, endpoint, addHook, state };
 })();
