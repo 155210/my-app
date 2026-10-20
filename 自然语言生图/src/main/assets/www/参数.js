@@ -110,12 +110,14 @@
             quality: '',        // 留空 = 模型默认
             negative: '',       // 留空 = 模型默认
             naturalLanguage: true,
+            transparent: false, // V5 透明背景（出 PNG 带透明通道）
+            furry: false,       // Furry 模式：正面最前面加 fur dataset（V4 起）
             vibes: [],          // 画风参考图：{ id, name, on, strength 强度, info 信息提取量 }；图和编码另存在 vibe:<id>（见 参考图.js）
         },
         // 留空 = 内置（规范见 写词.js，破限词、思维链见 自定义提示词.js）；heavy = 重型提示词（酒馆预设），打开时在 自定义提示词.js 里补全
         prompts: { system: '', jailbreak: '', thinking: '', useJailbreak: true, useThinking: true, retries: 1, heavy: null },
         autoDraw: true,          // 写完提示词自动出图
-        tags: { hint: true, fix: true }, // 标签库：给 AI 参考标签、写完纠错（见 标签库.js）
+        tags: { hint: true, fix: true, complete: true, highlight: true }, // 标签库：给 AI 参考标签、写完纠错（见 标签库.js）；联想、高亮（提示词编辑.js）；wildcards 通配符（通配符.js）
         chars: { inject: true, autoCreate: true, autoUpdate: true }, // 角色库：外貌发给 AI、自动建档、永久变化自动更新（见 角色库.js）
     };
 
