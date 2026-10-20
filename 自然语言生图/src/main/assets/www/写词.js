@@ -2,7 +2,7 @@
  * 写词.js —— 把中文描述交给 AI（OpenAI 兼容接口），让它写 NAI 用的正面 tag、英文描述、补充负面词、画幅
  *
  * AI 只回一段 JSON：{"tag":"...","nl":"...","negative":"...","size":"portrait|landscape"}
- * 格式不对自动再要一次。规范在设置里可以改，留空用下面的内置规范（参考「柏宝绘」的 NAI 规范改写）。
+ * 格式不对自动再要（次数在设置里改）。规范在设置里可以改，留空用下面的内置规范（参考「柏宝绘」的 NAI 规范改写）。
  */
 (function () {
     'use strict';
@@ -42,6 +42,20 @@
     // 扩展口：AI 写完后改结果，Writer.addFilter(fn)，fn(结果, settings) 返回新结果（标签库纠错用）
     const filters = [];
     const addFilter = (fn) => filters.push(fn);
+    // 扩展口：发送前改整条消息链，Writer.addMessages(fn)，fn(消息数组, settings, { attempt 第几次（0 起）, parseFailed 之前格式不对过 })
+    // 返回新数组（破限词、思维链、重型提示词用，见 自定义提示词.js）
+    const msgHooks = [];
+    const addMessages = (fn) => msgHooks.push(fn);
+    /** 实际发给 AI 的消息（buildMessages 再过一遍 addMessages 的扩展） */
+    function messagesFor(settings, text, extra, state) {
+        state = state || { attempt: 0, parseFailed: false };
+        return msgHooks.reduce((m, fn) => fn(m, settings, state) || m, buildMessages(settings, text, extra));
+    }
+    /** 格式不对自动重试几次（设置 prompts.retries，0~5，默认 1） */
+    function retriesOf(settings) {
+        const n = Math.floor(Number(settings.prompts && settings.prompts.retries));
+        return Number.isFinite(n) ? Math.min(5, Math.max(0, n)) : 1;
+    }
 
     function buildMessages(settings, text, extra) {
         const nlOn = settings.nai.naturalLanguage && Params.supportsNl(settings.nai.model);
@@ -86,12 +100,12 @@
         if (!String(api.url || '').trim()) throw new Error('请先在设置里填 AI 接口地址');
         if (!String(api.model || '').trim()) throw new Error('请先在设置里选 AI 模型');
         if (!String(opt.text || '').trim()) throw new Error('先写一句中文描述');
-        const tries = 1 + (opt.retries == null ? 1 : opt.retries);
+        const tries = 1 + (opt.retries == null ? retriesOf(settings) : opt.retries);
         let lastErr = null, hint = '';
         for (let i = 0; i < tries; i++) {
             const r = await Api.chat({
                 api, model: api.model,
-                messages: buildMessages(settings, opt.text, hint),
+                messages: messagesFor(settings, opt.text, hint, { attempt: i, parseFailed: !!lastErr }),
                 params: { stream: api.stream !== false, temperature: api.temperature },
                 signal: opt.signal,
                 onDelta: (c) => opt.onDelta && opt.onDelta(c),
@@ -109,5 +123,5 @@
         throw new Error(lastErr.message + '（已自动重试）');
     }
 
-    window.Writer = { DEFAULT_SPEC, run, parseReply, buildMessages, addContext, addFilter };
+    window.Writer = { DEFAULT_SPEC, run, parseReply, buildMessages, messagesFor, retriesOf, addContext, addFilter, addMessages };
 })();

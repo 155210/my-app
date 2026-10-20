@@ -102,7 +102,7 @@
 
     function html() {
         return '<div class="card"><div class="card-title">导出设置</div>'
-            + '<div class="card-sub">AI 接口、NAI 出图参数、质量词 / 负面词、画师串、提示词规范等全部设置，存成一个文件放到「下载/自然语言生图」。换手机、重装前先导出一份。图库里的图不在里面。</div>'
+            + '<div class="card-sub">AI 接口、NAI 出图参数、质量词 / 负面词、画师串、自定义提示词、重型提示词等全部设置，存成一个文件放到「下载/自然语言生图」。换手机、重装前先导出一份。图库里的图不在里面。</div>'
             + '<label class="check" style="margin-top:10px"><span class="switch"><input type="checkbox" id="bk-keys"' + (withKeys ? ' checked' : '') + '><span></span></span>'
             + '<span>连 API Key 和 NAI Key 一起导出<div class="help">要发给别人用就别勾</div></span></label>'
             + '<div class="btns"><button class="btn primary" data-act="bk-export">导出设置</button></div></div>'
