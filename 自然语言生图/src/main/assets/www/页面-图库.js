@@ -1,6 +1,7 @@
 /*
  * 页面-图库.js —— 图库页：缩略图网格（小 / 中 / 大 / 铺满四档），长按弹菜单；
- * 点开看大图：左右滑动换图、双指 / 双击缩放、长按保存，上滑或点「配方」看完整出图配方，下滑关闭
+ * 点开看大图：左右滑动换图、双指 / 双击缩放、长按保存，上滑或点「配方」看完整出图配方，下滑关闭；
+ * 「读图」：从手机里选一张 NAI 出的图，读出里面藏的提示词和参数（Gallery.readInfo）
  */
 (function () {
     'use strict';
@@ -8,6 +9,7 @@
     const { $, esc, toast } = UI;
     const root = () => $('#view-gallery');
     const ICON_MORE = '<svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></svg>';
+    const ICON_READ = '<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h10M7 13h6"/></svg>';
     const ICON_INFO = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/></svg>';
 
     const mb = (n) => (n < 102400 ? Math.max(1, Math.round(n / 1024)) + ' KB' : (n / 1048576).toFixed(n >= 10485760 ? 0 : 1) + ' MB');
@@ -66,13 +68,16 @@
         const items = await Gallery.list();
         const p = await Gallery.getPrefs();
         if (!items.length) {
-            r.innerHTML = '<div class="empty"><b>还没有图</b>在「创作」里出的图会自动存在这里</div>';
+            r.innerHTML = '<div class="empty"><b>还没有图</b>在「创作」里出的图会自动存在这里'
+                + '<div class="btns" style="justify-content:center"><button class="btn" id="g-read">读取图片信息</button></div></div>';
+            $('#g-read', r).onclick = pickAndRead;
             return;
         }
         const total = items.reduce((a, x) => a + (x.bytes || 0), 0);
         const full = p.size === 'full';
         r.innerHTML = '<div class="g-bar"><span class="card-sub">共 ' + items.length + ' 张' + (total ? ' · ' + mb(total) : '') + '</span>'
             + '<div class="seg" id="g-size">' + Gallery.SIZES.map(([k, t]) => '<button data-v="' + k + '"' + (k === p.size ? ' class="on"' : '') + '>' + t + '</button>').join('') + '</div>'
+            + '<button class="icon-btn" id="g-read" aria-label="读取图片信息">' + ICON_READ + '</button>'
             + '<button class="icon-btn" id="g-opts" aria-label="图库选项">' + ICON_MORE + '</button></div>'
             + '<div class="grid size-' + p.size + '">' + items.map((x) => {
                 const m = x.meta || {};
@@ -89,6 +94,7 @@
             refresh();
         };
         $('#g-opts', r).onclick = openOptions;
+        $('#g-read', r).onclick = pickAndRead;
         // 大 / 铺满：缩略图不够清楚，滚到眼前时换成原图
         if ((p.size === 'l' || full) && 'IntersectionObserver' in window) {
             observer = new IntersectionObserver((ents) => ents.forEach(async (en) => {
@@ -111,11 +117,13 @@
         const k = await menu('', [
             { k: 'save', label: '存到相册', icon: UI.ICON.save },
             { k: 'recipe', label: '看配方', icon: ICON_INFO },
+            { k: 'read', label: '读图片里藏的信息', icon: ICON_READ },
             { k: 'copy', label: '复制正面', icon: UI.ICON.copy },
             { k: 'del', label: '删除', icon: UI.ICON.del, danger: true },
         ]);
         if (k === 'save') save(item);
         if (k === 'recipe') openRecipe(item);
+        if (k === 'read') readItem(item);
         if (k === 'copy') UI.copyText((item.meta || {}).positive || item.tag);
         if (k === 'del' && await confirmDelete(item)) refresh();
     }
@@ -126,7 +134,8 @@
         const pngs = items.filter((x) => String(x.ext).toLowerCase() === 'png');
         const L = UI.openLayer('sheet', '<div class="grip"></div><h3>图库选项</h3>'
             + '<label class="check"><span class="switch"><input type="checkbox" id="g-jpg"' + (p.jpg ? ' checked' : '') + '><span></span></span>'
-            + '<span>新图自动转存成 JPG<div class="help">NAI 回的是 PNG，一张 1~2 MB；转成 JPG 大约省一半以上，肉眼看不出差别。配方另外存着，不受影响。</div></span></label>'
+            + '<span>新图自动转存成 JPG<div class="help">NAI 回的是 PNG，一张 1~2 MB；转成 JPG 大约省一半以上，肉眼看不出差别。App 里的配方另外存着不受影响，'
+            + '<b>但 JPG 里没有 NAI 的出图信息了，拖回 NovelAI 官网、或用「读取图片信息」都读不出提示词。</b>想留着这个就别开。</div></span></label>'
             + '<div class="field"><label>JPG 质量</label><select id="g-q">'
             + [[0.8, '80（更省空间）'], [0.9, '90'], [0.92, '92（默认）'], [0.95, '95'], [0.98, '98（更清楚）']].map(([v, t]) => '<option value="' + v + '"' + (Math.abs(p.quality - v) < 1e-6 ? ' selected' : '') + '>' + t + '</option>').join('')
             + '</select></div>'
@@ -138,6 +147,7 @@
         $('#g-q', L.box).onchange = (e) => Gallery.setPrefs({ quality: Number(e.target.value) });
         $('#g-conv', L.box).onclick = async (e) => {
             const b = e.target;
+            if (!await UI.confirmBox('全部转成 JPG？', '能省不少空间，但转完的图里就没有 NAI 的出图信息了（拖回官网读不出提示词），转了改不回来。App 里的配方不受影响。', '转换')) return;
             b.disabled = true;
             const r = await Gallery.convertAll((i, n) => { b.textContent = '转换中 ' + i + '/' + n; });
             b.textContent = '转好了';
@@ -201,6 +211,86 @@
             }
         };
         return L;
+    }
+
+
+    // ------------------------------------------------------------
+    // 读取图片信息：NAI PNG 里藏的提示词和参数
+    // ------------------------------------------------------------
+    function pickAndRead() {
+        const inp = document.createElement('input');
+        inp.type = 'file';
+        inp.accept = 'image/png,image/*';
+        inp.onchange = () => { const f = inp.files && inp.files[0]; if (f) showInfo(f, f.name); };
+        inp.click();
+    }
+
+    async function readItem(item) {
+        const blob = await Gallery.getBlob(item.id);
+        if (!blob) { toast('error', '原图找不到了'); return; }
+        showInfo(blob, Gallery.fileName(item));
+    }
+
+    /** 把读出来的提示词拆回创作页的格式：去掉画师串、质量词、模型默认负面词，免得重画时又叠一遍 */
+    function toDraft(info) {
+        const nai = UI.settings.nai;
+        let tag = info.prompt.trim(), nl = '';
+        const artist = (nai.artist || '').trim();
+        if (artist && tag.startsWith(artist + ', ')) tag = tag.slice(artist.length + 2);
+        const q = Params.qualityOf(nai);
+        const qi = q ? tag.lastIndexOf(', ' + q) : -1;
+        if (qi >= 0) {
+            const rest = tag.slice(qi + 2 + q.length);
+            tag = tag.slice(0, qi);
+            if (rest.startsWith('. ')) nl = rest.slice(2);
+        }
+        let neg = info.negative.trim();
+        const d = Params.negativeOf(nai);
+        if (d && neg.startsWith(d)) neg = neg.slice(d.length).replace(/^\s*,\s*/, '');
+        const p = info.params;
+        return { desc: '', tag, nl, extraNegative: neg, meta: { size: p.width > p.height ? 'landscape' : 'portrait' } };
+    }
+
+    async function showInfo(blob, name) {
+        let info;
+        try { info = await Gallery.readInfo(blob); } catch (e) { info = null; }
+        if (!info) {
+            UI.confirmBox('这张图里没读到出图信息', (name ? name + '\n' : '') + '只有 NAI 直接出的 PNG 原图才带。转成 JPG、截图、或者发过微信 / QQ 的图，信息已经被去掉了。', '知道了');
+            return;
+        }
+        const p = info.params;
+        const rows = [
+            ['尺寸', p.width && p.height ? p.width + '×' + p.height : ''],
+            ['种子', p.seed], ['采样器', p.sampler], ['步数', p.steps], ['CFG', p.scale],
+            ['CFG Rescale', p.cfg_rescale], ['噪声调度', p.noise_schedule],
+            ['图生图强度', p.strength], ['软件', info.software], ['模型', info.source],
+            ['信息藏在', info.from],
+        ].filter((r) => r[1] !== undefined && r[1] !== null && r[1] !== '');
+        const blocks = [['正面提示词', info.prompt], ['负面提示词', info.negative]];
+        info.chars.forEach((c, i) => {
+            blocks.push(['角色 ' + (i + 1) + ' 正面', c.prompt]);
+            if (c.negative) blocks.push(['角色 ' + (i + 1) + ' 负面', c.negative]);
+        });
+        blocks.push(['参数', rows.map((r) => r[0] + '：' + r[1]).join('\n')]);
+        const shown = blocks.filter((b) => String(b[1] == null ? '' : b[1]).trim());
+        const L = UI.openLayer('sheet', '<div class="grip"></div><h3>图片信息</h3>'
+            + (name ? '<div class="card-sub" style="margin:-6px 0 10px">' + esc(name) + '</div>' : '')
+            + shown.map((b, i) => '<div class="label row"><span class="grow">' + esc(b[0]) + '</span><button class="btn small" data-copy="' + i + '">复制</button></div>'
+                + '<pre class="recipe">' + esc(b[1]) + '</pre>').join('')
+            + '<div class="btns"><button class="btn" data-a="seed"' + (p.seed === undefined ? ' disabled' : '') + '>复制种子</button>'
+            + '<button class="btn primary" data-a="use">填到创作页</button></div>');
+        L.box.onclick = (e) => {
+            const c = e.target.closest('[data-copy]');
+            if (c) { UI.copyText(String(shown[+c.dataset.copy][1])); return; }
+            const b = e.target.closest('[data-a]'); if (!b) return;
+            if (b.dataset.a === 'seed') UI.copyText(String(p.seed));
+            if (b.dataset.a === 'use') {
+                UI.closeLayer(L);
+                // 从大图里读的，连大图一起关掉
+                while (UI.$('#layers').lastElementChild) UI.closeLayer();
+                CreatePage.reuse(toDraft(info));
+            }
+        };
     }
 
     // ------------------------------------------------------------
@@ -386,10 +476,12 @@
                 { k: 'save', label: '存到相册', icon: UI.ICON.save },
                 { k: 'copy', label: '复制正面', icon: UI.ICON.copy },
                 { k: 'recipe', label: '看配方', icon: ICON_INFO },
+                { k: 'read', label: '读图片里藏的信息', icon: ICON_READ },
             ]);
             if (k === 'save') save(cur());
             if (k === 'copy') UI.copyText((cur().meta || {}).positive || cur().tag);
             if (k === 'recipe') openRecipe(cur(), close);
+            if (k === 'read') readItem(cur());
         }
 
         $('.acts', L.box).onclick = async (e) => {
@@ -410,5 +502,5 @@
         await load(idx);
     }
 
-    window.GalleryPage = { refresh, openViewer, openRecipe };
+    window.GalleryPage = { refresh, openViewer, openRecipe, showInfo };
 })();
