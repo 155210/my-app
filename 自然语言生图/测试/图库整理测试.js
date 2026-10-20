@@ -68,6 +68,7 @@ const fails = []; const ok = (c, m) => { if (!c) fails.push(m); console.log((c ?
   await page.click('#g-views [data-view="fav"]');
   await page.waitForFunction(() => document.querySelectorAll('.thumb').length === 3);
   ok((await page.textContent('#g-views [data-view="fav"]')).includes('3'), '「只看收藏」只剩 3 张，按钮上有数字');
+  ok(await page.textContent('#g-views [data-view=""]') === '全部4', '「全部」也显示张数：' + await page.textContent('#g-views [data-view=""]'));
   // 大图里的星星：取消收藏
   await page.click('.thumb:nth-child(1)');
   await page.waitForSelector('[data-fav].on');
