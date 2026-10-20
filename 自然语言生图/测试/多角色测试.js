@@ -142,6 +142,7 @@ const tmp = fs.mkdtempSync(path.join(OUT, 'vibe-'));
   await page.waitForSelector('.vibe-item');
   ok(await page.inputValue('.vibe-item [data-f="name"]') === 'ref', '加了一张参考图，名字取文件名');
   ok((await page.textContent('.vibe-item [data-st]')).includes('还没编码'), '显示还没编码、出图时扣 2 Anlas');
+  ok(await page.evaluate(() => { const e = Cost.estimate(UI.settings.nai, {}, 1).parts.find((x) => x.label === '画风参考图'); return e && e.anlas === 2; }), '出图预估里算上首次编码 2 Anlas');
   await page.$eval('.vibe-item [data-f="strength"]', (el) => { el.value = '0.8'; el.dispatchEvent(new Event('input', { bubbles: true })); });
   await page.$eval('.vibe-item [data-f="info"]', (el) => { el.value = '0.5'; el.dispatchEvent(new Event('input', { bubbles: true })); });
   ok(await page.evaluate(() => UI.settings.nai.vibes[0].strength === 0.8 && UI.settings.nai.vibes[0].info === 0.5), '强度、信息提取量存进设置');
@@ -161,6 +162,7 @@ const tmp = fs.mkdtempSync(path.join(OUT, 'vibe-'));
   await page.click('#c-draw');
   await page.waitForTimeout(500);
   ok(encodes.length === 1, '已编码的不再扣');
+  ok(!(await page.evaluate(() => Cost.estimate(UI.settings.nai, {}, 1).parts.some((x) => x.label === '画风参考图'))), '编码过了预估里不再算编码费');
   await page.$eval('.vibe-item [data-f="info"]', (el) => { el.value = '1'; el.dispatchEvent(new Event('input', { bubbles: true })); });
   await page.click('#c-draw');
   await page.waitForTimeout(600);
@@ -243,9 +245,9 @@ const tmp = fs.mkdtempSync(path.join(OUT, 'vibe-'));
   await page.waitForTimeout(400);
   const dmeta = await page.evaluate(async () => (await Gallery.list())[0].meta.dirRefs);
   ok(dmeta && dmeta[0].type === 'style' && dmeta[0].fidelity === 0.3, '配方记下角色参考');
-  if (await page.evaluate(() => !!window.Cost)) {
-    ok(await page.evaluate(() => Cost.estimate ? true : true), '有 Anlas 预估模块');
-  }
+  const est = await page.evaluate(() => Cost.estimate(UI.settings.nai, { size: 'portrait' }, 2));
+  const dpart = est.parts.find((x) => x.label === '角色参考');
+  ok(dpart && dpart.anlas === 10 && !est.parts.some((x) => x.label === '画风参考图'), '出图预估：开着的一张角色参考 × 两张图 = +10 Anlas，Vibe 暂停不算：' + JSON.stringify(est.parts));
   // V5 不发
   const v5d = await page.evaluate(() => Nai.buildBody(Object.assign({}, UI.settings.nai, { model: 'nai-diffusion-5-full' }), { tag: 'x' }).body.parameters);
   ok(!v5d.director_reference_images, 'V5 不发角色参考');
