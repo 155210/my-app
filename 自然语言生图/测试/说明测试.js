@@ -38,10 +38,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     groups: [...document.querySelectorAll('.help-group')].map((x) => x.textContent),
     drawAnlas: !!document.querySelector('.help-item[data-id="create.draw"] .badge.anlas'),
     writeAnlas: !!document.querySelector('.help-item[data-id="create.write"] .badge.anlas'),
-    vibeNote: (document.querySelector('.help-item[data-id="create.vibes"] .help-anlas') || {}).textContent || '',
+    vibeNote: (document.querySelector('.help-item[data-id="vibes"] .help-anlas') || {}).textContent || '',
   }));
   const badSel = await page.evaluate(() => Help.list.filter((e) => e.target).filter((e) => { try { document.querySelectorAll(e.target); return false; } catch (x) { return true; } }).map((e) => e.id));
   ok(!badSel.length, '所有提示的选择器都合法' + (badSel.length ? '：' + badSel.join(',') : ''));
+  const dup = await page.evaluate(() => { const seen = {}, d = []; Help.list.forEach((e) => { const k = (e.group || '') + '|' + e.title; if (seen[k]) d.push(k); seen[k] = 1; }); return d; });
+  ok(!dup.length, '同一组里没有重复的条目' + (dup.length ? '：' + dup.join(',') : ''));
   ok(info.n >= 40, '说明页条目 ' + info.n + ' 条');
   ok(['开始之前', '创作页', '批量页', '图库', '设置'].every((g) => info.groups.includes(g)), '分组：' + info.groups.join('、'));
   ok(info.drawAnlas && !info.writeAnlas, '出图标了花 Anlas，AI 写提示词没标');
