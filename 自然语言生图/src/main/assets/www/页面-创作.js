@@ -47,7 +47,7 @@
             + '<div class="field"><label>正面提示词（英文标签，可以直接改）</label><textarea class="ta" id="c-tag" placeholder="AI 写好会填在这里，也可以自己写"></textarea></div>'
             + '<div class="field" id="c-nl-wrap"><label>英文画面描述（NAI 4.5 / V5 用）</label><textarea class="ta" id="c-nl"></textarea></div>'
             + '<div class="field"><label>补充负面词（不想出现的东西）</label><textarea class="ta small" id="c-neg" placeholder="可留空；通用负面词在设置里，会自动加"></textarea></div>'
-            + '<div class="row">'
+            + '<div class="row" style="flex-wrap:wrap">'
             + '<div class="seg" id="c-size" style="flex-shrink:0"><button data-v="portrait">竖图</button><button data-v="landscape">横图</button></div>'
             + '<span class="grow"></span>'
             + '<button class="btn" id="c-rewrite">AI 重写</button>'
