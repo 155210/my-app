@@ -105,13 +105,113 @@ const fails = []; const ok = (c, m) => { if (!c) fails.push(m); console.log((c ?
   await page.click('#tabbar [data-tab="gallery"]');
   await page.waitForSelector('.thumb');
   ok((await page.$$('.thumb')).length === 1, '图库里有 1 张');
-  await page.click('.thumb');
-  await page.waitForSelector('.viewer img');
-  const recipe = await page.$$eval('pre.recipe', (p) => p.map((x) => x.textContent).join('\n'));
-  ok(recipe.includes('黄昏天台') && recipe.includes('种子') && recipe.includes('1216×832'), '大图页显示完整配方');
+  ok(await page.evaluate(async () => (await Gallery.list())[0].ext) === 'png', '纯色小图转 JPG 反而更大时保留 PNG');
+  // 杂色大图：PNG 自动转存 JPG
+  const conv = await page.evaluate(async () => {
+    const c = document.createElement('canvas'); c.width = 320; c.height = 480;
+    const g = c.getContext('2d'), d = g.createImageData(320, 480);
+    for (let i = 0; i < d.data.length; i++) d.data[i] = (i % 4 === 3) ? 255 : (Math.random() * 256) | 0;
+    g.putImageData(d, 0, 0);
+    const png = await new Promise((r) => c.toBlob(r, 'image/png'));
+    const it = await Gallery.add(png, 'png', { desc: '杂色', tag: 'noise', meta: { positive: 'noise', negative: '', width: 320, height: 480, seed: 1, model: 'nai-diffusion-5-full', sampler: 'k_euler', steps: 28, scale: 5, size: 'portrait', characterPrompts: [{ prompt: 'x' }] } });
+    const blob = await Gallery.getBlob(it.id);
+    await Gallery.setPrefs({ jpg: false });
+    const it2 = await Gallery.add(png, 'png', { desc: '不转', tag: 'raw', meta: {} });
+    await Gallery.setPrefs({ jpg: true });
+    await Gallery.remove(it2.id);
+    return { ext: it.ext, orig: it.origExt, type: blob.type, smaller: blob.size < png.size, ext2: it2.ext };
+  });
+  ok(conv.ext === 'jpg' && conv.orig === 'png' && conv.type === 'image/jpeg' && conv.smaller, 'PNG 自动转存成 JPG 且更小');
+  ok(conv.ext2 === 'png', '关掉开关后保留 PNG');
+  await page.evaluate(() => GalleryPage.refresh()); await page.waitForTimeout(100);
+  ok((await page.$$('.thumb')).length === 2, '图库里有 2 张');
+
+  // 四档大小
+  for (const [v, cols] of [['s', 4], ['l', 2], ['full', 1], ['m', 3]]) {
+    await page.click('#g-size [data-v="' + v + '"]');
+    await page.waitForSelector('.grid.size-' + v);
+    const n = await page.$eval('.grid', (g) => getComputedStyle(g).gridTemplateColumns.split(' ').length);
+    ok(n === cols, '显示大小「' + v + '」→ 每行 ' + n + ' 张');
+  }
+  ok(await page.evaluate(async () => (await Store.get('galleryPrefs')).size) === 'm', '显示大小记住了');
+
+  // 选项里一键转换已有 PNG
+  await page.click('#g-opts');
+  await page.click('#g-conv');
+  await page.waitForFunction(() => document.querySelector('#g-conv').textContent === '转好了');
+  await page.click('.sheet [data-close]');
+
+  // 缩略图长按弹菜单
+  const tb = await page.$('.thumb[data-id]');
+  const bb = await tb.boundingBox();
+  await page.mouse.move(bb.x + 20, bb.y + 20); await page.mouse.down(); await page.waitForTimeout(650); await page.mouse.up();
+  ok(!!await page.$('.sheet .menu-item[data-k="save"]'), '长按缩略图弹出菜单');
+  await page.evaluate(() => window.__appBack());
+  ok(!await page.$('.viewer'), '长按后不会误开大图');
+
+  // 大图：打开第二张（较早出的那张）
+  await page.click('.thumb:nth-child(2)');
+  await page.waitForSelector('.v-stage img');
+  const count = () => page.$eval('[data-count]', (e) => e.textContent.replace(/\s/g, ''));
+  ok(await count() === '2/2', '大图显示第 2 / 2 张');
+  const st = await (await page.$('.v-stage')).boundingBox();
+  const cx = st.x + st.width / 2, cy = st.y + st.height / 2;
+  // 向右滑 → 上一张
+  await page.mouse.move(cx - 100, cy); await page.mouse.down(); await page.mouse.move(cx, cy, { steps: 5 }); await page.mouse.move(cx + 100, cy, { steps: 5 }); await page.mouse.up();
+  await page.waitForTimeout(450);
+  ok(await count() === '1/2', '右滑换到上一张');
+  await page.keyboard.press('ArrowRight'); await page.waitForTimeout(450);
+  ok(await count() === '2/2', '方向键换到下一张');
+  // 双击放大、再双击还原
+  const scale = () => page.$eval('.v-stage img', (i) => { const m = /scale\(([\d.]+)\)/.exec(i.style.transform); return m ? +m[1] : 1; });
+  await page.mouse.click(cx, cy); await page.waitForTimeout(80); await page.mouse.click(cx, cy);
+  ok(await scale() === 2.5, '双击放大到 2.5 倍');
+  await page.waitForTimeout(400);
+  await page.mouse.click(cx, cy); await page.waitForTimeout(80); await page.mouse.click(cx, cy);
+  ok(await scale() === 1, '再双击还原');
+  // 双指缩放（合成两个触点）
+  await page.waitForTimeout(400);
+  await page.evaluate(([x, y]) => {
+    const s = document.querySelector('.v-stage');
+    const f = (type, id, px) => s.dispatchEvent(new PointerEvent(type, { pointerId: id, clientX: px, clientY: y, bubbles: true, pointerType: 'touch' }));
+    f('pointerdown', 11, x - 40); f('pointerdown', 12, x + 40);
+    for (let k = 1; k <= 10; k++) { f('pointermove', 11, x - 40 - k * 6); f('pointermove', 12, x + 40 + k * 6); }
+    f('pointerup', 11, x - 100); f('pointerup', 12, x + 100);
+  }, [cx, cy]);
+  const s2 = await scale();
+  ok(Math.abs(s2 - 2.5) < 0.05, '双指张开放大（' + s2.toFixed(2) + ' 倍）');
+  ok(await count() === '2/2', '放大时不会误换图');
+  await page.mouse.click(cx, cy); await page.waitForTimeout(80); await page.mouse.click(cx, cy);
+  await page.waitForTimeout(400);
+  // 长按大图 → 菜单
+  await page.mouse.move(cx, cy); await page.mouse.down(); await page.waitForTimeout(700); await page.mouse.up();
+  ok(!!await page.$('.sheet .menu-item[data-k="save"]'), '长按大图弹出保存菜单');
+  await page.click('.sheet .menu-item[data-k="recipe"]');
+  await page.waitForSelector('.sheet pre.recipe');
+  const recipe = await page.$$eval('.sheet pre.recipe', (p) => p.map((x) => x.textContent).join('\n'));
+  ok(recipe.includes('黄昏天台') && recipe.includes('种子') && recipe.includes('1216×832') && recipe.includes('glasses') && recipe.includes('A girl smiles'), '配方里有描述、标签、英文描述、负面、参数');
+  await page.waitForTimeout(300); await page.screenshot({ path: OUT + '/配方.png' });
+  await page.evaluate(() => window.__appBack());
   await page.screenshot({ path: OUT + '/图库大图.png' });
-  await page.click('[data-a="reuse"]');
+  // 其他参数（后面的功能加进 meta 的字段）也显示
+  await page.keyboard.press('ArrowLeft'); await page.waitForTimeout(450);
+  await page.click('[data-a="recipe"]');
+  ok((await page.$$eval('.sheet pre.recipe', (p) => p.map((x) => x.textContent).join('\n'))).includes('characterPrompts'), '配方显示其他参数');
+  await page.evaluate(() => window.__appBack());
+  // 上滑看配方
+  await page.mouse.move(cx, cy + 100); await page.mouse.down(); await page.mouse.move(cx, cy, { steps: 5 }); await page.mouse.move(cx, cy - 100, { steps: 5 }); await page.mouse.up();
+  ok(!!await page.$('.sheet pre.recipe'), '上滑打开配方');
+  await page.evaluate(() => window.__appBack());
+  // 删除当前（杂色那张）→ 自动显示剩下那张
+  await page.click('.viewer [data-a="del"]');
+  await page.click('.dialog [data-yes]');
+  await page.waitForFunction(() => document.querySelector('[data-count]').textContent.replace(/\s/g, '') === '1/1');
+  ok(true, '大图里删除后显示剩下那张');
+  await page.click('.viewer [data-a="reuse"]');
   ok(await page.$eval('#view-create', (v) => !v.hidden), '「用这套重画」回到创作页');
+  await page.screenshot({ path: OUT + '/创作重画.png' });
+  await page.click('#tabbar [data-tab="gallery"]');
+  await page.screenshot({ path: OUT + '/图库.png' });
 
   // 重开页面：设置、草稿、图库都还在
   await page.reload();
