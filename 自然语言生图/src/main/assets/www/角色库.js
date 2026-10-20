@@ -54,6 +54,7 @@
             note: String(c.note || ''),
             source: c.source === 'ai' ? 'ai' : 'manual',
             history: Array.isArray(c.history) ? c.history.slice(-HISTORY_MAX) : [],
+            wardrobe: c.wardrobe && typeof c.wardrobe === 'object' ? JSON.parse(JSON.stringify(c.wardrobe)) : null, // 衣柜（见 衣柜.js）
         };
     }
 
@@ -79,9 +80,11 @@
         return list.find((c) => lower(c.name) === k) || list.find((c) => namesOf(c).some((n) => lower(n) === k)) || null;
     }
 
-    /** 外貌标签串（按固定顺序拼） */
+    /** 外貌标签串（按固定顺序拼）；衣柜里选了正在穿的那套时，「固定着装」换成那套衣服（按穿脱状态、遮挡算好的） */
     function tagsOf(c) {
-        return FIELD_KEYS.map((k) => c.fields[k]).map((s) => s.replace(/^[,，\s]+|[,，\s]+$/g, '')).filter(Boolean).join(', ');
+        const wear = window.Wardrobe ? Wardrobe.outfitTags(c) : null;
+        return FIELD_KEYS.map((k) => (k === 'outfit' && wear != null ? wear : c.fields[k]))
+            .map((s) => String(s || '').replace(/^[,，\s]+|[,，\s]+$/g, '')).filter(Boolean).join(', ');
     }
 
     /** 中文描述里出现了哪些角色（名字或别名是描述的一部分） */
@@ -295,15 +298,24 @@
             + (o.length ? '<div class="label">' + (g.length ? '其他角色' : '全部角色') + '</div>' + o.map(cardHtml).join('') : '');
     }
 
+    // 扩展口：衣柜、AI 生成、写真往角色库页面和编辑页里加东西
+    const listActions = [];   // { label, run(重画列表) } → 角色库页面顶上的按钮
+    const editorParts = [];   // { html(d, isNew), bind(box, d, 刷新预览, L) } → 编辑页「拼出来的外貌标签」前面
+    const addListAction = (a) => listActions.push(a);
+    const addEditorPart = (p) => editorParts.push(p);
+
     const HELP = '描述或提示词里写角色的名字，就会自动换成这里存的外貌标签，同一个角色每张图长得一样。';
 
     async function open() {
         await ready;
         const L = UI.openLayer('page', '<div class="page-head"><button class="icon-btn" data-close>' + UI.ICON.back + '</button><b>角色库</b>'
             + '<button class="btn small primary" data-new>新建角色</button></div>'
-            + '<div class="page-body"><div class="help" style="margin-bottom:12px">' + HELP + '</div><div class="cl-list"></div></div>');
+            + '<div class="page-body"><div class="help" style="margin-bottom:12px">' + HELP + '</div>'
+            + (listActions.length ? '<div class="btns cl-acts" style="justify-content:flex-start;margin:0 0 12px">' + listActions.map((a, i) => '<button class="btn" data-la="' + i + '">' + esc(a.label) + '</button>').join('') + '</div>' : '')
+            + '<div class="cl-list"></div></div>');
         const draw = () => { $('.cl-list', L.box).innerHTML = listHtml(); };
         draw();
+        $$('[data-la]', L.box).forEach((b) => { b.onclick = () => listActions[Number(b.dataset.la)].run(draw); });
         $('[data-new]', L.box).onclick = () => edit(null, draw);
         $('.cl-list', L.box).addEventListener('click', (e) => {
             const card = e.target.closest('[data-id]');
@@ -338,6 +350,7 @@
             + '<div class="help">玩家、主角这类固定角色。AI 不会改它的外貌，只有你自己能改</div></span></label>'
             + '<div class="label" style="margin-top:14px">固定外貌（英文标签，逗号分隔）</div>'
             + FIELDS.map((f) => '<div class="field"><label>' + esc(f.label) + '</label><input type="text" data-f="' + f.k + '" placeholder="' + esc(f.ph) + '"></div>').join('')
+            + editorParts.map((p) => p.html(d, isNew)).join('')
             + '<div class="field"><label>拼出来的外貌标签</label><pre class="recipe cl-preview"></pre></div>'
             + '<div class="field"><label>备注（只给自己看）</label><textarea class="ta small" data-f="note"></textarea></div>'
             + (isNew ? '' : '<div class="btns" style="justify-content:flex-start"><button class="btn danger" data-del>删除这个角色</button></div>')
@@ -357,6 +370,7 @@
             });
         });
         preview();
+        editorParts.forEach((p) => p.bind(box, d, preview, L));
 
         $('[data-save]', box).onclick = () => {
             d.name = d.name.trim();
@@ -367,7 +381,7 @@
             if (isNew) create(d, 'manual');
             else {
                 FIELD_KEYS.forEach((k) => { if (d.fields[k] !== c.fields[k]) record(c, k, c.fields[k], d.fields[k], '', 'manual'); });
-                Object.assign(c, { name: d.name, alias: d.alias.trim(), global: d.global, fields: d.fields, note: d.note });
+                Object.assign(c, { name: d.name, alias: d.alias.trim(), global: d.global, fields: d.fields, note: d.note, wardrobe: d.wardrobe });
                 save();
             }
             UI.closeLayer(L);
@@ -432,7 +446,7 @@
     });
 
     window.CharLib = {
-        ready, open, edit, find, mentioned, tagsOf, expand, expandDetail, expandParams, parseChanges, applyChanges, contextText, create, remove, undo,
+        ready, open, edit, find, save, normalizeOne, addListAction, addEditorPart, FIELD_KEYS, mentioned, tagsOf, expand, expandDetail, expandParams, parseChanges, applyChanges, contextText, create, remove, undo,
         FIELDS, get list() { return list; },
     };
 })();

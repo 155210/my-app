@@ -21,6 +21,7 @@ PR 上也会打包，但只放在 Actions 的附件里，不发 Release。
 ├── 测试/备份更新测试.js        设置导出导入、检查更新（假 GitHub 接口）
 ├── 测试/队列测试.js            队列：多张、并发、429 重试、取消、失败重试、重绘
 ├── 测试/标签库测试.js          标签库的测试
+├── 测试/角色系统测试.js        衣柜（穿脱、遮挡）、AI 一句话生成角色、写真模式
 ├── 测试/角色库测试.js          角色库：建档、名字换外貌、AI 自动建档/永久变化、全局角色、撤销
 ├── 测试/自定义提示词测试.js    破限词/规范/思维链、重型提示词（酒馆预设）的测试
 ├── 测试/批量测试.js          拆成多张、AI 重写（附要求）、创作页英文描述开关、批量页
@@ -59,6 +60,9 @@ PR 上也会打包，但只放在 Actions 的附件里，不发 Release。
         ├── 标签库.js             【标签库】中英对照、搜索、点一下加进提示词；给 AI 参考标签、写完纠错
         ├── 图库角色.js           图库按角色筛选 / 搜索：从配方认出角色库的角色、Danbooru 角色和作品标签（中文名）
         ├── 角色库.js             【角色库】存固定外貌、名字换外貌标签、AI 自动建档和永久变化、全局角色（AI 不改）
+        ├── 角色生成.js           【角色系统】AI 一句话生成角色外貌 + 初始衣柜（填进编辑页，保存才入库）
+        ├── 衣柜.js               【角色系统】每个角色多套衣服、每件穿脱状态、里层被外层挡住不写（照 NAIWeaver 改写）
+        ├── 写真.js               【角色系统】写真模式：选角色/衣服/表情/姿势/镜头/场景，不经 AI 直接出图
         ├── 依赖/标签.json        标签库数据（4 万多个，由 工具/做标签库.py 生成）
         └── 启动.js               启动、底部标签切换
 ```
@@ -146,7 +150,16 @@ PW=/opt/node-tools/node_modules/playwright CHROME=/opt/pw-browsers/chromium-1194
 - AI 回的 JSON 可以多一个 `changes` 数组（格式同柏宝绘）：`{"name","field":"new","fields":{...}}` 建新角色；`{"name","field":"hair","to":"...","reason"}` 永久变化。全局角色一律不改；已有角色收到 `new` 只补空字段。开关在设置 → 角色库
 - 名字换外貌（`Writer.addFilter` + `Nai.addTagFilter`，多角色的角色提示词用最后注册的 `Nai.addHook`）：逗号分隔的某一项整个是角色名/别名就换成外貌标签并去重。性别标签单独处理：提示词里已有人数标签（`2girls`、`3people`…）就不加，没有就按角色数合成（两个 1girl → `2girls`）
 - 改动记录：每次改字段都记一条（最多 30 条），AI 改的可以点「撤销」
+- 扩展口：`CharLib.addListAction({ label, run })` 角色库页面顶上加按钮；`CharLib.addEditorPart({ html(d, isNew), bind(box, d, 刷新预览, L) })` 编辑页里加一块（衣柜、AI 生成、写真入口用它）
 - `CharLib`：`find(名字)`、`tagsOf(角色)`、`expand(标签串)`、`mentioned(中文描述)`、`applyChanges(changes)`、`open()`
+
+## 衣柜、AI 生成角色、写真
+
+- 衣柜存在角色上：`角色.wardrobe = { current, outfits: [{ id, name, items: { 部位: { tags, state } } }] }`。部位 10 个（outerwear 外套 / top 上衣 / dress 连衣裙 / bottom 下装 / bra / panties / legwear 袜子 / footwear 鞋 / headwear 头饰 / accessory 配饰），状态 intact 穿好 / unbuttoned / open / lifted / pulled_down / aside / around_ankles / removed（每个部位只允许合理的几种）。
+- `Wardrobe.render(一套)` → `{ tags, nsfw, hidden, removed }`：上衣 / 连衣裙 / 合襟长外套穿好时胸罩、内裤不写；脱掉写 topless / bottomless / no bra / barefoot（穿着袜子不写 barefoot），上下都露合成 nude / completely nude；看得见的衣服不整齐时加 nsfw。
+- `CharLib.tagsOf(角色)`：选了「正在穿」的那套就用它代替「固定着装」（固定着装仍接在后面），所以名字换外貌、发给 AI 的外貌都带衣服。
+- AI 生成：设置里的 AI 接口，回 `{ name, alias, fields, outfits }`，格式不对自动重试一次。
+- 写真：标签 = 外貌（含这次选的衣服和临时穿脱状态）, 表情, 姿势, 自定义姿势, 镜头, 场景, 自定义场景；走 `CreatePage.draw`（`characters: []`，不带创作页多角色格子），配方 desc 是「写真：名字」。选择存在 `photoshoot` 键。出图按钮用 `Cost.estimate` / `Cost.tag` 标 Anlas（没有 `window.Cost` 就不标）。
 
 ## 本地调试
 
