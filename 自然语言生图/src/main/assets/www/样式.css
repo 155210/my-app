@@ -171,7 +171,10 @@ textarea.ta.small { min-height: 56px; }
 
 /* 图库 */
 .g-bar { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; }
-.g-bar .card-sub { flex: 1; margin: 0; }
+.g-bar { gap: 4px; }
+.g-bar .card-sub { flex: 1; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.g-bar .icon-btn { width: 34px; height: 34px; }
+.g-bar .icon-btn svg { width: 20px; height: 20px; }
 .g-bar .seg button { padding: 4px 11px; font-size: 13px; }
 .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
 .grid.size-s { grid-template-columns: repeat(4, 1fr); gap: 4px; }
@@ -181,6 +184,14 @@ textarea.ta.small { min-height: 56px; }
     -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; }
 .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
 .grid.size-full .thumb img { object-fit: contain; }
+.thumb { position: relative; }
+.grid.selecting .thumb::after { content: ''; position: absolute; top: 6px; right: 6px; width: 20px; height: 20px; border-radius: 50%;
+    border: 2px solid #fff; background: rgba(0, 0, 0, .35); box-shadow: 0 0 3px rgba(0, 0, 0, .6); }
+.grid.selecting .thumb.picked { outline: 3px solid var(--accent); outline-offset: -3px; }
+.grid.selecting .thumb.picked img { opacity: .75; }
+.grid.selecting .thumb.picked::after { background: var(--accent) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M6 12l4 4 8-9' fill='none' stroke='%231e1a14' stroke-width='3'/%3E%3C/svg%3E") center/14px no-repeat; border-color: var(--accent); }
+.sel-bar .grow { flex: 1; }
+.check.radio input { width: 20px; height: 20px; accent-color: var(--accent); flex: none; align-self: flex-start; margin-top: 3px; }
 
 /* 大图 */
 .viewer { flex: 1; min-height: 0; display: flex; flex-direction: column; padding-bottom: var(--safe-bottom); }

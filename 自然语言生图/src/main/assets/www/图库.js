@@ -3,7 +3,8 @@
  *
  *   gallery       索引数组（新的在前）：{ id, time, ext, bytes, origExt, thumb, desc, tag, nl, extraNegative, meta }
  *   img:<id>      原图 Blob
- *   galleryPrefs  图库自己的偏好：{ size: 小/中/大/铺满, jpg: PNG 自动转 JPG, quality: JPG 质量 }
+ *   galleryPrefs  图库自己的偏好：{ size: 小/中/大/铺满, jpg: PNG 自动转 JPG, quality: JPG 质量,
+ *                 save: 存到手机的位置 hidden/album/custom, saveTree / saveTreeName: 自选文件夹, saveHide: 自选文件夹里放 .nomedia }
  * 界面在 页面-图库.js。
  *
  * NAI 出的 PNG 里自带出图信息（tEXt 的 Comment JSON + 透明通道最低位的「隐写」信息），
@@ -16,16 +17,28 @@
     let index = null;
 
     const SIZES = [['s', '小'], ['m', '中'], ['l', '大'], ['full', '铺满']];
-    const PREFS = { size: 'm', jpg: false, quality: 0.92 };
+    const PREFS = { size: 'm', jpg: false, quality: 0.92, save: 'hidden', saveTree: '', saveTreeName: '', saveHide: true };
+    const SAVE_MODES = [
+        ['hidden', '隐藏文件夹（默认）', '下载/自然语言生图/图片/，系统相册里看不到，文件管理器里能找到'],
+        ['album', '相册', '相册里的「自然语言生图」文件夹'],
+        ['custom', '自己选的文件夹', ''],
+    ];
     let prefs = null;
 
+    /** 把保存位置告诉 App 外壳（浏览器里没有外壳就跳过） */
+    function syncTarget() {
+        const b = window.AndroidBridge;
+        if (!b || !b.setSaveTarget || !prefs) return;
+        try { b.setSaveTarget(prefs.save, prefs.saveTree || '', !!prefs.saveHide); } catch (e) { /* 老外壳 */ }
+    }
     async function getPrefs() {
-        if (!prefs) prefs = Object.assign({}, PREFS, await Store.get('galleryPrefs', {}));
+        if (!prefs) { prefs = Object.assign({}, PREFS, await Store.get('galleryPrefs', {})); syncTarget(); }
         return prefs;
     }
     async function setPrefs(patch) {
         Object.assign(await getPrefs(), patch);
         await Store.set('galleryPrefs', prefs);
+        syncTarget();
         return prefs;
     }
 
@@ -209,6 +222,15 @@
 
     async function getBlob(id) { return Store.get('img:' + id, null); }
 
+    /** 一次删多张（只写一次索引） */
+    async function removeMany(ids) {
+        const set = new Set(ids);
+        const items = await list();
+        for (let i = items.length - 1; i >= 0; i--) if (set.has(items[i].id)) items.splice(i, 1);
+        for (const id of set) await Store.del('img:' + id);
+        await Store.set('gallery', items);
+    }
+
     async function remove(id) {
         const items = await list();
         const i = items.findIndex((x) => x.id === id);
@@ -225,6 +247,7 @@
 
     /** 存到手机相册（App 里）/ 浏览器下载 */
     async function saveToPhone(item) {
+        await getPrefs(); // 保证保存位置已经同步给外壳
         const blob = await getBlob(item.id);
         if (!blob) throw new Error('原图找不到了');
         if (window.__saveBlob) return window.__saveBlob(blob, fileName(item));
@@ -235,5 +258,5 @@
         return '浏览器下载';
     }
 
-    window.Gallery = { list, add, getBlob, remove, saveToPhone, fileName, getPrefs, setPrefs, convertAll, readInfo, SIZES };
+    window.Gallery = { list, add, getBlob, remove, saveToPhone, fileName, getPrefs, setPrefs, convertAll, readInfo, removeMany, SIZES, SAVE_MODES };
 })();
