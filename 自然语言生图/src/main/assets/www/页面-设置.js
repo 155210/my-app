@@ -54,6 +54,10 @@
     }
 
     function tabNai() {
+        const n0 = UI.settings.nai;
+        const st = (n0.styleId && n0.styles.find((x) => x.id === n0.styleId)) || {};
+        // 当前画风模板自己填了质量词 / 负面提示词时，这里的不生效（同柏宝绘「已被画师串覆盖」）
+        const overBadge = (v) => (String(v || '').trim() ? ' <span class="badge acc">已被画风模板「' + esc(st.name || '未命名') + '」覆盖</span>' : '');
         const n = UI.settings.nai;
         return text('NAI 地址', 'nai.url', { ph: Params.NAI_OFFICIAL, help: '官方填 ' + Params.NAI_OFFICIAL + '；第三方站填它给的地址' })
             + text('NAI Key', 'nai.key', { type: 'password', help: '官方 Key 在 NovelAI 网页 → 设置 → Account → Get Persistent API Token' })
@@ -77,9 +81,9 @@
             + '<option value="">不用模板</option>' + n.styles.map((x) => '<option value="' + esc(x.id) + '">' + esc(x.name || '未命名') + '</option>').join('')
             + '</select><button class="btn" data-act="styles">管理</button></div>'
             + '<div class="help">模板里存画师串、质量词、负面提示词、后缀，创作页也能下拉切换；模板里的质量词、负面提示词填了就优先用模板的</div></div>'
-            + '<div class="field"><label>正面质量词（拼在正面最后）</label><textarea class="ta" data-k="nai.quality" placeholder="' + esc(Params.QUALITY[n.model] || '') + '"></textarea>'
+            + '<div class="field"><label>正面质量词（拼在正面最后）' + overBadge(st.quality) + '</label><textarea class="ta" data-k="nai.quality" placeholder="' + esc(Params.QUALITY[n.model] || '') + '"></textarea>'
             + '<div class="help">留空 = 用模型默认（灰字就是默认值）。<a href="#" data-act="reset-q">恢复默认</a></div></div>'
-            + '<div class="field"><label>负面提示词</label><textarea class="ta" data-k="nai.negative" placeholder="' + esc(Params.NEGATIVE[n.model] || '') + '"></textarea>'
+            + '<div class="field"><label>负面提示词' + overBadge(st.uc) + '</label><textarea class="ta" data-k="nai.negative" placeholder="' + esc(Params.NEGATIVE[n.model] || '') + '"></textarea>'
             + '<div class="help">留空 = 用模型默认（灰字就是默认值）。AI 补的负面词会接在后面。<a href="#" data-act="reset-n">恢复默认</a></div></div>';
     }
 

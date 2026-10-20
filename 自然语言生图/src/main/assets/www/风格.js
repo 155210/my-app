@@ -34,9 +34,9 @@
                 + '<div class="row" style="margin-bottom:8px"><input class="grow" type="text" data-k="' + k + 'name" placeholder="模板名字">'
                 + (on ? '<span class="badge acc">正在用</span>' : '<button class="btn" data-act="style-use" data-i="' + i + '">用这套</button>') + '</div>'
                 + '<div class="field"><label>前缀（画师串，拼在正面最前）</label><textarea class="ta small" data-k="' + k + 'prefix" placeholder="artist:xxx, 0.8::artist:yyy::"></textarea></div>'
-                + '<div class="field"><label>正面质量词（这套专用，拼在正面最后）</label><textarea class="ta small" data-k="' + k + 'quality" placeholder="' + esc(Params.globalQuality(n)) + '"></textarea>'
+                + '<div class="field"><label>正面质量词（这套专用，拼在正面最后）' + setBadge(x.quality) + '</label><textarea class="ta small" data-k="' + k + 'quality" placeholder="' + esc(Params.globalQuality(n)) + '"></textarea>'
                 + '<div class="help">留空 = 用「NAI 出图」页的质量词（灰字就是现在会用的）</div></div>'
-                + '<div class="field"><label>负面提示词（这套专用）</label><textarea class="ta small" data-k="' + k + 'uc" placeholder="' + esc(Params.globalNegative(n)) + '"></textarea>'
+                + '<div class="field"><label>负面提示词（这套专用）' + setBadge(x.uc) + '</label><textarea class="ta small" data-k="' + k + 'uc" placeholder="' + esc(Params.globalNegative(n)) + '"></textarea>'
                 + '<div class="help">留空 = 用「NAI 出图」页的负面词（灰字就是现在会用的）</div></div>'
                 + '<div class="field"><label>后缀（拼在画面标签后、质量词前）</label><textarea class="ta small" data-k="' + k + 'suffix" placeholder="可留空，比如 flat color, cel shading"></textarea></div>'
                 + '<div class="field"><label>额外负面词（接在负面提示词后面）</label><textarea class="ta small" data-k="' + k + 'negative" placeholder="可留空"></textarea></div>'
@@ -51,6 +51,7 @@
             + (n.styles.some((x) => x.id === 'st_default') ? '' : '<button class="btn" data-act="style-builtin">加回内置那套</button>') + '</div>';
     }
 
+    const setBadge = (v) => (String(v || '').trim() ? ' <span class="badge acc">已设置</span>' : ' <span class="badge">未设置</span>');
     const idx = (btn) => Number(btn.dataset.i);
 
     SettingsPage.addTab({
