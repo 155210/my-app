@@ -587,7 +587,7 @@
     // ------------------------------------------------------------
     // 完整配方
     // ------------------------------------------------------------
-    const KNOWN = ['positive', 'negative', 'width', 'height', 'seed', 'model', 'sampler', 'steps', 'scale', 'size', 'cfgRescale', 'noiseSchedule', 'style', 'characters', 'vibes', 'dirRefs'];
+    const KNOWN = ['positive', 'negative', 'width', 'height', 'seed', 'model', 'sampler', 'steps', 'scale', 'size', 'cfgRescale', 'noiseSchedule', 'style', 'characters', 'vibes', 'dirRefs', 'request'];
 
     function recipeText(item) {
         const m = item.meta || {};
@@ -628,7 +628,7 @@
         const L = UI.openLayer('sheet', '<div class="grip"></div><h3>出图配方</h3>'
             + blocks.map((b, i) => '<div class="label row"><span class="grow">' + esc(b[0]) + '</span><button class="btn small" data-copy="' + i + '">复制</button></div>'
                 + '<pre class="recipe">' + esc(b[1]) + '</pre>').join('')
-            + '<div class="btns"><button class="btn" data-a="all">复制全部</button><button class="btn" data-a="seed">复制种子</button>'
+            + '<div class="btns"><button class="btn" data-a="req">复制正负面</button><button class="btn" data-a="all">复制全部</button><button class="btn" data-a="seed">复制种子</button>'
             + '<button class="btn primary" data-a="reuse">用这套重画</button></div>');
         L.box.onclick = (e) => {
             const c = e.target.closest('[data-copy]');
@@ -636,6 +636,7 @@
             const b = e.target.closest('[data-a]'); if (!b) return;
             if (b.dataset.a === 'all') UI.copyText(blocks.map((x) => '【' + x[0] + '】\n' + x[1]).join('\n\n'));
             if (b.dataset.a === 'seed') UI.copyText(String((item.meta || {}).seed));
+            if (b.dataset.a === 'req') UI.copyText(Nai.promptText(item.meta || {})); // 实际发给 NAI 的正负面（旧图没存分角色的，只有总的正负面）
             if (b.dataset.a === 'reuse') {
                 UI.closeLayer(L);
                 if (onReuse) onReuse();

@@ -304,11 +304,14 @@
         let body;
         try { body = Nai.buildBody(UI.settings.nai, draft); } catch (e) { toast('error', e.message); return; }
         const m = body.meta;
-        UI.openLayer('sheet', '<div class="grip"></div><h3>实际发给 NAI 的内容</h3>'
+        const L = UI.openLayer('sheet', '<div class="grip"></div><h3>实际发给 NAI 的内容</h3>'
             + '<div class="label">正面</div><pre class="recipe">' + esc(m.positive) + '</pre>'
             + '<div class="label">负面</div><pre class="recipe">' + esc(m.negative) + '</pre>'
             + '<div class="card-sub">' + esc(Params.modelLabel(m.model) + ' · ' + m.width + '×' + m.height + ' · ' + m.sampler + ' · ' + m.steps + ' 步 · CFG ' + m.scale) + '</div>'
-            + '<div class="btns"><button class="btn" data-close>关闭</button></div>');
+            + '<div class="btns"><button class="btn primary" data-a="copy">复制正负面</button><button class="btn" data-close>关闭</button></div>');
+        L.box.addEventListener('click', (e) => {
+            if (e.target.closest('[data-a="copy"]')) UI.copyText(Nai.promptText(m, body.body));
+        });
     }
 
     /** 从图库「用这套重画」、批量页「填到创作页」、拆多张的「填到上面」：把这套提示词填回来 */
