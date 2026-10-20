@@ -29,6 +29,7 @@ PR 上也会打包，但只放在 Actions 的附件里，不发 Release。
     ├── java/com/example/nlimage/   从自制AI问答机照搬的外壳
     │   ├── MainActivity.java     WebView 外壳，加载 assets/www/首页.html，JS 桥 AndroidBridge
     │   ├── NativeHttp.java       请求代发（无跨域限制、支持 http、流式逐块回传）
+    │   ├── ApkUpdater.java     应用内更新：下载新版 APK、调起系统安装（FileProvider）
     │   ├── FileSaver.java        图片按保存位置存：隐藏文件夹 下载/自然语言生图/图片/（带 .nomedia，默认）/ 相册 / 自选文件夹（SAF）；其他文件进 下载/自然语言生图/
     │   └── KeepAliveService.java 写提示词、出图期间开的前台服务，切后台不断
     └── assets/www/
@@ -54,7 +55,7 @@ PR 上也会打包，但只放在 Actions 的附件里，不发 Release。
         ├── 页面-批量.js          【批量页】一行一条描述，挨个写提示词、写完一条出一条（存 batch 键）
         ├── 页面-图库.js          图库页（四档大小、长按菜单、多选批量保存/删除、保存位置）、大图（左右滑、双指/双击缩放、长按保存、上滑配方）、完整配方、读取图片信息
         ├── 备份.js               设置导出 / 导入（设置页「备份」标签，图库不进备份）
-        ├── 更新.js               检查更新：查 Releases 里最新 shengtu-N，和本机 1.0.N 比，交给浏览器下载
+        ├── 更新.js               检查更新：查 Releases 里最新 shengtu-N，和本机 1.0.N 比，外壳下载后调起安装
         ├── 标签库.js             【标签库】中英对照、搜索、点一下加进提示词；给 AI 参考标签、写完纠错
         ├── 图库角色.js           图库按角色筛选 / 搜索：从配方认出角色库的角色、Danbooru 角色和作品标签（中文名）
         ├── 角色库.js             【角色库】存固定外貌、名字换外貌标签、AI 自动建档和永久变化、全局角色（AI 不改）

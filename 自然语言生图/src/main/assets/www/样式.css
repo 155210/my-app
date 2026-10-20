@@ -242,3 +242,5 @@ pre.recipe { margin: 0 0 12px; padding: 8px 10px; border-radius: 10px; backgroun
 .vibe-slider span { width: 5em; flex: none; }
 .vibe-slider input { flex: 1; min-width: 0; accent-color: var(--accent); }
 .vibe-slider b { width: 2.6em; text-align: right; font-weight: 400; color: var(--text); }
+.up-bar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; margin: 8px 0 4px; }
+.up-bar > div { height: 100%; width: 0; background: var(--accent); transition: width .3s; }

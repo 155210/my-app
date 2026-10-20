@@ -93,6 +93,32 @@ const RELEASES = [
   await page.goto(home);
   await page.waitForSelector('#c-write');
 
+  // App 里：外壳自己下载，下完调起安装；第一次要去开「安装未知应用」
+  await page.evaluate(() => {
+    window.__calls = [];
+    let n = 0;
+    window.AndroidBridge = {
+      appVersion: () => '1.0.3',
+      updateDownload: (u) => { __calls.push('dl:' + u); setTimeout(() => __updateProgress(1048576, 3145728), 50); setTimeout(() => __updateDone(true, ''), 150); },
+      updateCancel: () => __calls.push('cancel'),
+      updateInstall: () => { __calls.push('install'); return ++n === 1 ? 'PERMISSION' : 'OK'; },
+    };
+  });
+  await page.evaluate(() => { Updater.check(); });
+  await page.waitForSelector('.dialog [data-yes]');
+  await page.click('.dialog [data-yes]');
+  await page.waitForSelector('.dialog [data-msg]');
+  await page.waitForFunction(() => /1\.0 \/ 3\.0 MB/.test(document.querySelector('.dialog [data-msg]').textContent));
+  ok(true, '下载进度显示 1.0 / 3.0 MB');
+  await page.waitForFunction(() => __calls.includes('install'));
+  ok((await page.textContent('.dialog [data-msg]')).includes('安装未知应用'), '没权限时提示去开「安装未知应用」');
+  await page.click('.dialog [data-install]');
+  ok((await page.textContent('.dialog [data-msg]')).includes('已打开安装界面'), '再点安装调起系统安装');
+  const calls = await page.evaluate(() => __calls);
+  ok(calls[0] === 'dl:https://dl.test/s5.apk' && calls.filter((c) => c === 'install').length === 2 && !calls.includes('cancel'), '外壳调用顺序：下载 → 安装 ×2，没误取消');
+  await page.click('.dialog [data-cancel]');
+  ok(!(await page.$('.dialog')), '关闭下载框');
+
   await page.evaluate(() => { window.AndroidBridge = { appVersion: () => '1.0.5' }; });
   const n0 = ghCalls;
   await page.evaluate(() => Updater.check());

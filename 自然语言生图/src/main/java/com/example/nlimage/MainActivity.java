@@ -45,6 +45,7 @@ public class MainActivity extends Activity {
     private ValueCallback<Uri[]> fileCallback;
     private NativeHttp http;
     private FileSaver saver;
+    private ApkUpdater updater;
 
     @SuppressLint({"SetJavaScriptEnabled", "JavascriptInterface"})
     @Override
@@ -125,6 +126,7 @@ public class MainActivity extends Activity {
 
         http = new NativeHttp(web);
         saver = new FileSaver(this);
+        updater = new ApkUpdater(this, web);
         web.addJavascriptInterface(new Bridge(), "AndroidBridge");
 
         web.loadUrl(HOME);
@@ -192,6 +194,12 @@ public class MainActivity extends Activity {
     }
 
     @Override
+    protected void onResume() {
+        super.onResume();
+        if (updater != null) updater.onResume();
+    }
+
+    @Override
     protected void onDestroy() {
         http.shutdown();
         KeepAliveService.stop(this);
@@ -201,6 +209,21 @@ public class MainActivity extends Activity {
 
     /** 暴露给网页的原生方法（在 JavaBridge 线程上调用） */
     private class Bridge {
+        @JavascriptInterface
+        public void updateDownload(String url) {
+            updater.download(url);
+        }
+
+        @JavascriptInterface
+        public void updateCancel() {
+            updater.cancel();
+        }
+
+        @JavascriptInterface
+        public String updateInstall() {
+            return updater.install();
+        }
+
         @JavascriptInterface
         public void httpStart(String id, String method, String url, String headersJson, String bodyB64) {
             http.start(id, method, url, headersJson, bodyB64);
