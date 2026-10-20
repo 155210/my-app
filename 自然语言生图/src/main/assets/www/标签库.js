@@ -401,7 +401,7 @@
             + '<label class="check"><span class="switch"><input type="checkbox" data-k="tags.complete"><span></span></span><span>手打提示词时联想标签'
             + '<div class="help">在提示词格子里打字（中文英文都行），下面出一排候选，点一下换上；还有调权重的 − ＋ 和看说明的 ⓘ</div></span></label>'
             + '<label class="check"><span class="switch"><input type="checkbox" data-k="tags.highlight"><span></span></span><span>提示词语法高亮'
-            + '<div class="help">加权橙色、减权蓝色、负权重红色、画师紫色、通配符绿色，标签库里没有的标签带虚下划线（改完重开设置页生效）</div></span></label>'
+            + '<div class="help">加权标橙底、减权蓝底、负权重红底、画师紫底、通配符绿底，标签库里没有的标签带虚下划线</div></span></label>'
             + '<div class="btns" style="justify-content:flex-start"><button class="btn primary" data-act="tags-open">打开标签库</button></div>'
             + '<div class="help" style="margin-top:14px">标签和热度来自 NAIWeaver 的标签表（Danbooru），中文翻译来自 a1111-sd-webui-tagcomplete-CN、BooruTagCart，缺的部分手动补译。</div>',
         acts: { 'tags-open': () => open() },

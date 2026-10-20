@@ -4,7 +4,9 @@
  *  2. 调权重：联想条最左边 − 1.1 ＋，给光标所在的标签加减权重（V4 起写成 1.1::标签::，V3 写成 {标签} / [标签]）；ⓘ 看标签说明
  *  3. 语法高亮：加权（橙）、减权（蓝）、负权重（红）、画师（紫）、通配符（绿）、标签库里没有的标签（虚下划线）
  *
- * 高亮做法：格子背后垫一层同样字体、同样排版的 div 显示彩色文字，格子本身文字透明、光标照常。
+ * 高亮做法：格子背后垫一层同样字体、同样排版的 div，里面的字透明，只画彩色底色和虚下划线；格子本身的字照常显示。
+ * （以前是格子的字透明、背后那层显示彩色字，手机上两层排版只要差一点，就会出现滑不到底、选字选到一半停住，所以改成这样：
+ *  滑动、选字、光标都是格子自己的，背后那层就算偏一点也只是色块偏一点。）
  * 别的代码直接改 .value 不发 input 事件也没关系：每个格子的 value 赋值被接管了，改完自动重画。
  * 开关在设置 → 标签库（tags.complete、tags.highlight）。
  */
@@ -258,11 +260,11 @@
     setTimeout(scan, 0);
 
     document.head.insertAdjacentHTML('beforeend', '<style>'
-        + '.pe-back{position:absolute;z-index:0;box-sizing:border-box;border-style:solid;border-color:transparent;white-space:pre-wrap;overflow-wrap:break-word;word-break:break-word;overflow:hidden;color:var(--text);pointer-events:none;background:var(--bg)}'
-        + 'textarea.pe-on{position:relative;z-index:1;background:transparent!important;color:transparent!important;caret-color:var(--text)}'
-        + 'textarea.pe-on::placeholder{color:var(--faint)}textarea.pe-on::selection{color:transparent;background:rgba(226,166,91,.35)}'
-        + '.pe-up{color:#f0b46a}.pe-dn{color:#86aee8}.pe-neg{color:#ef7d75}.pe-op{color:var(--faint)}.pe-art{color:#c9a2ef}.pe-wc{color:#7fcf9a}'
-        + '.pe-unk{text-decoration:underline dotted rgba(232,179,94,.7);text-underline-offset:3px}'
+        + '.pe-back{position:absolute;z-index:0;box-sizing:border-box;border-style:solid;border-color:transparent;white-space:pre-wrap;overflow-wrap:break-word;overflow:hidden;color:transparent;pointer-events:none;background:var(--bg);-webkit-text-size-adjust:none;text-size-adjust:none;-webkit-user-select:none;user-select:none}'
+        + 'textarea.pe-on{position:relative;z-index:1;background:transparent!important}'
+        + '.pe-back span{border-radius:3px}'
+        + '.pe-up{background:rgba(240,180,106,.28)}.pe-dn{background:rgba(134,174,232,.28)}.pe-neg{background:rgba(239,125,117,.32)}.pe-art{background:rgba(201,162,239,.26)}.pe-wc{background:rgba(127,207,154,.28)}'
+        + '.pe-unk{text-decoration:underline dotted rgba(232,179,94,.85);text-underline-offset:3px}'
         + '.pe-strip{display:flex;gap:6px;overflow-x:auto;padding:6px 0 2px;scrollbar-width:none}.pe-strip::-webkit-scrollbar{display:none}'
         + '.pe-strip button{flex:none;border:1px solid var(--line);background:var(--bg3);border-radius:999px;padding:3px 10px;font-size:13px;color:var(--dim);white-space:nowrap}'
         + '.pe-strip button b{color:var(--text);font-weight:500}'
