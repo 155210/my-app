@@ -74,10 +74,23 @@
             + '<div class="btns"><button class="btn" data-act="fill-spec">把内置规范填进来改</button><button class="btn danger" data-act="reset-spec">恢复内置</button></div>';
     }
 
+    // 标签页表：以后的功能（备份、更新、角色库…）用 SettingsPage.addTab 加自己的页，不用改这里
+    const TABS = [
+        { id: 'ai', label: 'AI 接口', html: tabAi },
+        { id: 'nai', label: 'NAI 出图', html: tabNai },
+        { id: 'spec', label: '提示词规范', html: tabSpec },
+    ];
+    const extraActs = {};
+    /** t: { id, label, html() 返回表单 HTML（data-k 自动绑定）, acts: { 名字: async (按钮, 重画) => {} } } */
+    function addTab(t) {
+        TABS.push(t);
+        Object.assign(extraActs, t.acts || {});
+    }
+
     function render(L) {
         const body = $('.page-body', L.box);
         $$('.tabs button', L.box).forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
-        body.innerHTML = tab === 'ai' ? tabAi() : tab === 'nai' ? tabNai() : tabSpec();
+        body.innerHTML = (TABS.find((t) => t.id === tab) || TABS[0]).html();
         $$('[data-k]', body).forEach((el) => {
             const v = get(el.dataset.k);
             if (el.type === 'checkbox') el.checked = !!v; else el.value = v == null ? '' : v;
@@ -99,6 +112,7 @@
 
     async function act(a, btn, L) {
         const s = UI.settings;
+        if (extraActs[a]) return extraActs[a](btn, () => render(L));
         if (a === 'models' || a === 'test-ai') {
             if (!checkJson('ai.headers', '额外请求头') || !checkJson('ai.extra', '额外请求参数')) return;
             btn.disabled = true;
@@ -125,11 +139,11 @@
     function open(which) {
         if (which) tab = which;
         const L = UI.openLayer('page', '<div class="page-head"><button class="icon-btn" data-close>' + UI.ICON.back + '</button><b>设置</b></div>'
-            + '<div class="tabs"><button data-tab="ai">AI 接口</button><button data-tab="nai">NAI 出图</button><button data-tab="spec">提示词规范</button></div>'
+            + '<div class="tabs">' + TABS.map((t) => '<button data-tab="' + t.id + '">' + esc(t.label) + '</button>').join('') + '</div>'
             + '<div class="page-body"></div>', { onClose: () => window.CreatePage && CreatePage.refresh() });
         $$('.tabs button', L.box).forEach((b) => b.addEventListener('click', () => { tab = b.dataset.tab; render(L); }));
         render(L);
     }
 
-    window.SettingsPage = { open };
+    window.SettingsPage = { open, addTab };
 })();

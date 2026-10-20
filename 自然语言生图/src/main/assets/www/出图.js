@@ -32,6 +32,11 @@
         return { positive, negative };
     }
 
+    // 扩展口：多角色、Vibe 等功能各自在自己的文件里 Nai.addHook(fn)，
+    // fn(params, nai, p) 直接改 parameters，不用改这个文件
+    const hooks = [];
+    const addHook = (fn) => hooks.push(fn);
+
     function randomSeed() { return Math.floor(Math.random() * 2 ** 32); }
 
     /** 构造请求 body（纯函数，可测） */
@@ -75,6 +80,7 @@
             v4_prompt: { caption: { base_caption: positive, char_captions: [] }, use_coords: false, use_order: true },
             v4_negative_prompt: { caption: { base_caption: negative, char_captions: [] }, legacy_uc: false },
         };
+        hooks.forEach((h) => h(params, nai, p));
         if (sampler === 'k_euler_ancestral') {
             params.deliberate_euler_ancestral_bug = false;
             params.prefer_brownian = true;
@@ -176,5 +182,5 @@
         return '连接正常：' + tier + (d.active === false ? '（订阅未激活）' : '') + '，Anlas 余额 ' + anlas;
     }
 
-    window.Nai = { generate, test, buildBody, fullPrompts, unzipFirstImage, endpoint };
+    window.Nai = { generate, test, buildBody, fullPrompts, unzipFirstImage, endpoint, addHook };
 })();

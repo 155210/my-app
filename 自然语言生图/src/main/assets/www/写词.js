@@ -36,10 +36,15 @@
         return (settings.prompts.system || '').trim() || DEFAULT_SPEC;
     }
 
+    // 扩展口：角色库、标签库等 Writer.addContext(fn)，fn(settings, text) 返回要附加给 AI 的参考文字（可空）
+    const contexts = [];
+    const addContext = (fn) => contexts.push(fn);
+
     function buildMessages(settings, text, extra) {
         const nlOn = settings.nai.naturalLanguage && Params.supportsNl(settings.nai.model);
         let user = text.trim();
         if (!nlOn) user += '\n\n（这次 nl 字段写空字符串。）';
+        contexts.map((fn) => fn(settings, text)).filter(Boolean).forEach((c) => { user += '\n\n' + c; });
         if (extra) user += '\n\n' + extra;
         return [
             { role: 'system', content: specOf(settings) },
@@ -98,5 +103,5 @@
         throw new Error(lastErr.message + '（已自动重试）');
     }
 
-    window.Writer = { DEFAULT_SPEC, run, parseReply, buildMessages };
+    window.Writer = { DEFAULT_SPEC, run, parseReply, buildMessages, addContext };
 })();
