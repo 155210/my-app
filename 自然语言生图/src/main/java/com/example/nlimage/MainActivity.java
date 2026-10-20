@@ -26,6 +26,8 @@ import android.widget.Toast;
 
 import androidx.webkit.WebViewAssetLoader;
 
+import org.json.JSONObject;
+
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
@@ -37,6 +39,7 @@ public class MainActivity extends Activity {
     private static final String TAG = "NlImage";
     private static final String HOME = "https://appassets.androidplatform.net/assets/www/" + Uri.encode("首页.html");
     private static final int REQ_FILE = 1001;
+    private static final int REQ_TREE = 1002;
 
     private WebView web;
     private ValueCallback<Uri[]> fileCallback;
@@ -141,6 +144,23 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        if (requestCode == REQ_TREE) {
+            String uri = null, name = null;
+            if (resultCode == RESULT_OK && data != null && data.getData() != null) {
+                Uri tree = data.getData();
+                try {
+                    getContentResolver().takePersistableUriPermission(tree,
+                            Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+                    uri = tree.toString();
+                    name = saver.treeName(tree);
+                } catch (Exception e) {
+                    Toast.makeText(this, "这个文件夹没法授权写入，换一个试试", Toast.LENGTH_LONG).show();
+                }
+            }
+            web.evaluateJavascript("window.__onSaveFolder && window.__onSaveFolder("
+                    + (uri == null ? "null" : JSONObject.quote(uri)) + "," + (name == null ? "null" : JSONObject.quote(name)) + ")", null);
+            return;
+        }
         if (requestCode != REQ_FILE) {
             super.onActivityResult(requestCode, resultCode, data);
             return;
@@ -204,6 +224,28 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public String fileEnd(String token) {
             return saver.end(token);
+        }
+
+        /** 图片保存位置：hidden / album / custom（tree = 文件夹授权 Uri，hide = 放 .nomedia） */
+        @JavascriptInterface
+        public void setSaveTarget(String mode, String tree, boolean hide) {
+            saver.setTarget(mode, tree, hide);
+        }
+
+        /** 打开系统文件夹选择器，选完回调 window.__onSaveFolder(uri, 名字)，取消回调 (null, null) */
+        @JavascriptInterface
+        public void pickSaveFolder() {
+            runOnUiThread(() -> {
+                Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+                i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                        | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+                try {
+                    startActivityForResult(i, REQ_TREE);
+                } catch (ActivityNotFoundException e) {
+                    Toast.makeText(MainActivity.this, "这台手机没有文件夹选择器", Toast.LENGTH_LONG).show();
+                    web.evaluateJavascript("window.__onSaveFolder && window.__onSaveFolder(null,null)", null);
+                }
+            });
         }
 
         @JavascriptInterface

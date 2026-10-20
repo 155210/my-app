@@ -259,6 +259,70 @@ const fails = []; const ok = (c, m) => { if (!c) fails.push(m); console.log((c ?
   await page.click('#tabbar [data-tab="gallery"]');
   await page.screenshot({ path: OUT + '/图库.png' });
 
+  // 多选：批量删除、批量保存
+  await page.evaluate(async () => {
+    for (let i = 0; i < 3; i++) {
+      const c = document.createElement('canvas'); c.width = 32; c.height = 48;
+      const b = await new Promise((r) => c.toBlob(r, 'image/png'));
+      await Gallery.add(b, 'png', { desc: '多选' + i, tag: 'm' + i, meta: { width: 32, height: 48 } });
+    }
+    await GalleryPage.refresh();
+  });
+  ok((await page.$$('.thumb')).length === 4, '多选前有 4 张');
+  await page.screenshot({ path: OUT + '/图库栏.png' });
+  await page.click('#g-sel');
+  await page.waitForSelector('.grid.selecting');
+  await page.click('.thumb:nth-child(1)'); await page.click('.thumb:nth-child(2)');
+  ok(await page.textContent('#g-sel-n') === '已选 2 张' && !await page.$('.viewer'), '多选模式点图是勾选，不打开大图');
+  await page.click('#g-sel-all');
+  ok(await page.textContent('#g-sel-n') === '已选 4 张' && await page.textContent('#g-sel-all') === '全不选', '全选');
+  await page.click('#g-sel-all');
+  ok(await page.textContent('#g-sel-n') === '已选 0 张' && await page.$eval('#g-sel-del', (b) => b.disabled), '全不选后删除按钮变灰');
+  ok(await page.evaluate(() => window.__appBack()) === true && !await page.$('.grid.selecting'), '返回键先退出多选');
+  // 长按 → 多选，带上这一张
+  const tb3 = await page.$('.thumb:nth-child(1)'); const bb3 = await tb3.boundingBox();
+  await page.mouse.move(bb3.x + 10, bb3.y + 10); await page.mouse.down(); await page.waitForTimeout(650); await page.mouse.up();
+  await page.click('.sheet .menu-item[data-k="multi"]');
+  await page.waitForSelector('.grid.selecting');
+  ok(await page.textContent('#g-sel-n') === '已选 1 张', '长按菜单「多选」带上这一张');
+  await page.click('.thumb:nth-child(2)'); await page.click('.thumb:nth-child(3)');
+  await page.screenshot({ path: OUT + '/多选.png' });
+  // 批量保存（浏览器里走下载）
+  const dls = [];
+  page.on('download', (d) => dls.push(d.suggestedFilename()));
+  await page.click('#g-sel-save');
+  await page.waitForTimeout(800);
+  ok(dls.length === 3, '批量保存 3 张（' + dls.length + '）');
+  await page.click('#g-sel-del');
+  await page.click('.dialog [data-yes]');
+  await page.waitForFunction(() => !document.querySelector('.grid.selecting'));
+  const left = await page.evaluate(async () => (await Gallery.list()).map((x) => x.desc));
+  ok(left.length === 1 && left[0].includes('黄昏'), '批量删除选中的 3 张，留下没选的');
+  ok((await page.$$('.thumb')).length === 1, '删完退出多选、网格刷新');
+
+  // 保存位置：默认隐藏文件夹；告诉外壳；自己选文件夹
+  const calls = await page.evaluate(async () => {
+    const log = [];
+    window.AndroidBridge = { setSaveTarget: (m, t, h) => log.push([m, t, h]), pickSaveFolder: () => setTimeout(() => window.__onSaveFolder('content://tree/abc', 'NAI图'), 10) };
+    log.push((await Gallery.getPrefs()).save);
+    return log;
+  });
+  ok(calls[0] === 'hidden', '保存位置默认是隐藏文件夹');
+  await page.click('#g-opts');
+  await page.click('input[name="g-save"][value="custom"]');
+  await page.waitForFunction(() => (document.querySelector('[data-help="custom"]') || {}).textContent === '现在是：NAI图');
+  await page.click('#g-hide');
+  await page.click('input[name="g-save"][value="album"]');
+  await page.waitForTimeout(100);
+  const after = await page.evaluate(async () => { const p = await Gallery.getPrefs(); return [p.save, p.saveTree, p.saveTreeName, p.saveHide]; });
+  ok(after[0] === 'album' && after[1] === 'content://tree/abc' && after[2] === 'NAI图' && after[3] === false, '选了文件夹、关掉隐藏、再切回相册都记住了');
+  await page.click('input[name="g-save"][value="custom"]');
+  await page.waitForTimeout(100);
+  ok((await page.evaluate(async () => (await Gallery.getPrefs()).save)) === 'custom', '已选过文件夹时直接切回，不再弹选择器');
+  await page.screenshot({ path: OUT + '/保存位置.png' });
+  await page.click('.sheet [data-close]');
+  await page.evaluate(async () => { await Gallery.setPrefs({ save: 'hidden' }); delete window.AndroidBridge; });
+
   // 重开页面：设置、草稿、图库都还在
   await page.reload();
   await page.waitForSelector('#c-write');
