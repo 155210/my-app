@@ -69,8 +69,9 @@ const RELEASES = [
   ok((await page.textContent('.dialog')).includes('导入这份设置'), '导入前确认');
   await Promise.all([page.waitForNavigation(), page.click('.dialog [data-yes]')]);
   await page.waitForSelector('#c-write');
-  const after = await page.evaluate(async () => ({ s: UI.settings, roles: await Store.get('roles'), gallery: await Store.get('gallery') }));
-  ok(after.s.ai.url === 'https://ai.test/v1' && after.s.nai.artist === 'artist:abc', '导入后设置恢复');
+  const after = await page.evaluate(async () => ({ s: UI.settings, style: Nai.activeStyle(UI.settings.nai), roles: await Store.get('roles'), gallery: await Store.get('gallery') }));
+  // 旧版画师串导入后会搬进画风模板（见 参数.js normalize）
+  ok(after.s.ai.url === 'https://ai.test/v1' && after.style && after.style.prefix === 'artist:abc', '导入后设置恢复');
   ok(after.s.ai.key === 'sk-new' && after.s.nai.key === 'nai-1', '文件没带 Key 时保留手机上的 Key');
   ok(after.roles && after.roles[0].name === '小红', '其他键也恢复');
   ok(after.gallery && after.gallery[0].id === 'x', '图库没被动');
