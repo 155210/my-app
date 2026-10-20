@@ -48,7 +48,7 @@
             + '<div class="field" id="c-nl-wrap"><label>英文画面描述（NAI 4.5 / V5 用）</label><textarea class="ta" id="c-nl"></textarea></div>'
             + '<div class="field"><label>补充负面词（不想出现的东西）</label><textarea class="ta small" id="c-neg" placeholder="可留空；通用负面词在设置里，会自动加"></textarea></div>'
             + '<div class="row" style="flex-wrap:wrap">'
-            + '<div class="seg" id="c-size" style="flex-shrink:0"><button data-v="portrait">竖图</button><button data-v="landscape">横图</button></div>'
+            + '<div class="seg" id="c-size" style="flex-shrink:0"><button data-v="portrait">竖图</button><button data-v="landscape">横图</button><button data-v="auto">AI 定</button></div>'
             + '<span class="grow"></span>'
             + '<button class="btn" id="c-rewrite">AI 重写</button>'
             + '<button class="btn" id="c-preview">实际发送</button>'
@@ -85,7 +85,8 @@
         $('#c-nlsw', r).checked = !!UI.settings.nai.naturalLanguage && nlOk;
         $('#c-nlsw', r).disabled = !nlOk;
         $('#c-nlsw-text', r).textContent = nlOk ? '生成英文描述' : '英文描述（这个模型不支持）';
-        UI.$$('#c-size button', r).forEach((b) => b.classList.toggle('on', b.dataset.v === draft.size));
+        // 「AI 定」亮着：AI 写完按它选的横竖；点了竖图 / 横图就固定，AI 不再改（sizeAuto 没存过的老草稿算 AI 定）
+        UI.$$('#c-size button', r).forEach((b) => b.classList.toggle('on', b.dataset.v === 'auto' ? draft.sizeAuto !== false : b.dataset.v === draft.size));
         const s = UI.settings;
         const q = Queue.state();
         const busy = q.running + q.waiting;
@@ -116,7 +117,18 @@
         on('#c-nl', 'input', (e) => { draft.nl = e.target.value; saveDraft(); });
         on('#c-neg', 'input', (e) => { draft.negative = e.target.value; saveDraft(); });
         on('#c-auto', 'change', (e) => { UI.settings.autoDraw = e.target.checked; UI.saveSettings(); });
-        on('#c-size', 'click', (e) => { const b = e.target.closest('button'); if (!b) return; draft.size = b.dataset.v; saveDraft(); refresh(); });
+        on('#c-size', 'click', (e) => {
+            const b = e.target.closest('button'); if (!b) return;
+            if (b.dataset.v === 'auto') {
+                if (draft.sizeAuto === false) toast('info', '横竖交给 AI：写完提示词按 AI 选的来');
+                draft.sizeAuto = true;
+            } else {
+                if (draft.sizeAuto !== false) toast('info', '固定' + (b.dataset.v === 'landscape' ? '横图' : '竖图') + '，AI 写完也不改；想让 AI 选就点「AI 定」');
+                draft.size = b.dataset.v;
+                draft.sizeAuto = false;
+            }
+            saveDraft(); refresh();
+        });
         on('#c-write', 'click', () => (writing ? writing.abort() : write()));
         on('#c-count', 'change', (e) => { draft.count = Number(e.target.value) || 1; saveDraft(); });
         on('#c-draw', 'click', () => CreatePage.draw()); // 走 CreatePage 上的，别的文件（底图）能包一层
@@ -156,7 +168,7 @@
     }
 
     function apply(res) {
-        Object.assign(draft, { tag: res.tag, nl: res.nl, negative: res.negative, size: res.size });
+        Object.assign(draft, { tag: res.tag, nl: res.nl, negative: res.negative, size: draft.sizeAuto === false ? draft.size : res.size });
         saveDraft();
         fill();
     }

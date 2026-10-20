@@ -13,7 +13,7 @@
 
     function save() { Store.set('plan', plan).catch(() => {}); }
 
-    const toP = (im) => ({ desc: im.desc ? plan.desc + '（' + im.desc + '）' : plan.desc, tag: im.tag, nl: im.nl, negative: im.negative, size: im.size });
+    const toP = (im) => ({ desc: im.desc ? plan.desc + '（' + im.desc + '）' : plan.desc, tag: im.tag, nl: im.nl, negative: im.negative, size: CreatePage.draft.sizeAuto === false ? CreatePage.draft.size : im.size }); // 创作页固定了横竖就照它
 
     function render() {
         const box = $('#c-plan-box');
@@ -23,7 +23,7 @@
             + '<button class="btn small primary" data-all>全部出图</button><button class="btn small" data-close-plan>收起</button></div>'
             + '<div class="card-sub">' + esc(plan.desc.slice(0, 80)) + '</div>'
             + plan.images.map((im, i) => '<div class="plan-item" data-i="' + i + '">'
-                + '<div class="row"><b class="grow">第 ' + (i + 1) + ' 张 <span class="badge">' + (im.size === 'landscape' ? '横图' : '竖图') + '</span>'
+                + '<div class="row"><b class="grow">第 ' + (i + 1) + ' 张 <span class="badge">' + (toP(im).size === 'landscape' ? '横图' : '竖图') + '</span>'
                 + (im.drawn ? ' <span class="badge acc">已出 ' + im.drawn + ' 次</span>' : '') + '</b>'
                 + '<button class="btn small" data-fill>填到上面</button><button class="btn small" data-one>出这张</button></div>'
                 + (im.desc ? '<div class="plan-desc">' + esc(im.desc) + '</div>' : '')
