@@ -19,6 +19,7 @@ PR 上也会打包，但只放在 Actions 的附件里，不发 Release。
 ├── 自然语言生图.keystore
 ├── 测试/网页测试.js            无头浏览器测试（假 AI + 假 NAI），见下
 ├── 测试/备份更新测试.js        设置导出导入、检查更新（假 GitHub 接口）
+├── 测试/队列测试.js            队列：多张、并发、429 重试、取消、失败重试、重绘
 └── src/main/
     ├── java/com/example/nlimage/   从自制AI问答机照搬的外壳
     │   ├── MainActivity.java     WebView 外壳，加载 assets/www/首页.html，JS 桥 AndroidBridge
@@ -34,7 +35,7 @@ PR 上也会打包，但只放在 Actions 的附件里，不发 Release。
         ├── 参数.js               【出图参数】模型表、默认质量词/负面词、采样器、尺寸、默认设置
         ├── 写词.js               【AI 流水线】内置规范、拼消息、解析 JSON、格式不对自动重试
         ├── 出图.js               【NAI】拼请求 body、解 zip、测试连接查 Anlas
-        ├── 队列.js               【队列】出图排队（现在并发 1）、取消、前台服务开关
+        ├── 队列.js               【队列】并发数可调、429 限流自动等待重试、单张/全部取消、失败重试、队列面板、设置页「出图队列」
         ├── 图库.js               【图库数据】存图、缩略图、配方、存相册
         ├── 工具.js               共用界面小工具（浮层、对话框、列表选择、设置读写）
         ├── 页面-设置.js          设置页（AI 接口 / NAI 出图 / 提示词规范）
@@ -51,6 +52,8 @@ PR 上也会打包，但只放在 Actions 的附件里，不发 Release。
 - `Writer.addContext(fn)`：`fn(设置, 中文描述)` 返回一段参考文字，附在发给 AI 的消息后面。角色库、标签库候选用它。
 - `SettingsPage.addTab({ id, label, html, acts })`：给设置页加一个标签页，表单项写 `data-k="路径"` 自动绑定保存。
 - 新设置字段加在 `参数.js` 的 `DEFAULTS` 里，老用户打开时自动补上。
+- 队列的设置（`nai.concurrency`、`nai.retry429`、`nai.maxRetries`）没进 `DEFAULTS`，默认值在 `队列.js` 的 `CFG_DEFAULTS`。
+- `Queue.add(fn, { label, retry })`：排一张进队列；`label` 显示在队列面板，`retry` 是失败后点「重试」时调的函数。
 
 ## 出图怎么拼
 
@@ -63,6 +66,8 @@ PR 上也会打包，但只放在 Actions 的附件里，不发 Release。
 ```
 PW=/opt/node-tools/node_modules/playwright CHROME=/opt/pw-browsers/chromium-1194/chrome-linux/chrome node 自然语言生图/测试/网页测试.js
 ```
+
+（`测试/队列测试.js` 同样的跑法。）
 
 起本地静态服务、拦截假 AI 和假 NAI 接口，走一遍：设置 → 拉模型 → 写提示词（第一次故意回错格式，测自动重试）→ 自动出图 → 图库大图 → 重开页面数据还在 → 返回键。
 
