@@ -53,6 +53,11 @@ const fails = []; const ok = (c, m) => { if (!c) fails.push(m); console.log((c ?
     r.pos = fp.positive; r.negTail = fp.negative.slice(-9);
     r.noStyle = Nai.fullPrompts(Object.assign({}, n, { styleId: '' }), { tag: 'cat' }).positive.startsWith('cat, ');
     r.meta = Nai.buildBody(n, { tag: 'cat' }).meta.style;
+    // 模板绑定的质量词 / 负面提示词：填了用模板的，留空跟「NAI 出图」页
+    const nb = Object.assign({}, n, { quality: 'global q', styles: [{ id: 's1', name: 'x', prefix: '', quality: 'tpl q', uc: 'tpl uc', suffix: '', negative: 'extra' }] });
+    const fb = Nai.fullPrompts(nb, { tag: 'cat', negative: 'dog' });
+    const fc = Nai.fullPrompts(Object.assign({}, nb, { styles: [{ id: 's1', name: 'x', prefix: '', quality: '', uc: '', suffix: '', negative: '' }] }), { tag: 'cat' });
+    r.bound = fb.positive === 'cat, tpl q' && fb.negative === 'tpl uc, extra, dog' && fc.positive === 'cat, global q' && fc.negative === Params.NEGATIVE[nb.model];
     // V3：没有 v4_prompt，有 sm；默认质量词
     const v3 = Nai.buildBody(Object.assign({}, n, { model: 'nai-diffusion-3', styleId: '' }), { tag: 'cat', nl: 'A cat.' }).body;
     r.v3 = !v3.parameters.v4_prompt && v3.parameters.sm === false && Array.isArray(v3.parameters.reference_image_multiple) && v3.parameters.params_version === 3
@@ -145,6 +150,7 @@ const fails = []; const ok = (c, m) => { if (!c) fails.push(m); console.log((c ?
   const kept = await page.evaluate(() => [UI.settings.nai.styles.length, Nai.activeStyle(UI.settings.nai).name, UI.settings.nai.landscapeSize]);
   ok(kept[0] === 2 && kept[1] === '厚涂' && kept[2] === '1280×768', '重开后模板和尺寸还在');
 
+  ok(u.bound, '画风模板绑定的质量词、负面提示词优先，留空跟 NAI 出图页');
   await browser.close(); srv.close();
   console.log(fails.length ? '\n失败 ' + fails.length + ' 项：\n' + fails.join('\n') : '\n全部通过');
   process.exit(fails.length ? 1 : 0);

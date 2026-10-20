@@ -89,8 +89,8 @@ PR 上也会打包，但只放在 Actions 的附件里，不发 Release。
 
 ## 出图怎么拼
 
-- 正面 = 画风模板前缀, AI 写的标签, 画风模板后缀, 质量词（设置里留空 = 模型默认）；4.5 / V5 且开了「英文描述」时再接 `. 英文描述`
-- 负面 = 负面词（留空 = 模型默认）, 画风模板负面词, AI 补的负面词
+- 正面 = 画风模板前缀, AI 写的标签, 画风模板后缀, 质量词（模板绑定的 → NAI 出图页的 → 模型默认，`Params.qualityOf`）；4.5 / V5 且开了「英文描述」时再接 `. 英文描述`
+- 负面 = 负面提示词（模板绑定的 `uc` → NAI 出图页的 → 模型默认，`Params.negativeOf`）, 模板额外负面词 `negative`, AI 补的负面词
 - V3 不发 `v4_prompt`（只读 `input`，带 `sm` 等老字段）；V4 发 `v4_prompt` 但不接英文描述；V5 选了 DDIM 自动换 Euler Ancestral
 - 出完一张 `出图.js` 发 `nai-drawn` 事件（快捷栏据此刷新 Anlas），`Nai.state.lastSeed` 是上一张的种子
 - 请求：`POST {NAI 地址}/ai/generate-image`，返回 zip，取第一张图（有的第三方站直接回 PNG 也认）

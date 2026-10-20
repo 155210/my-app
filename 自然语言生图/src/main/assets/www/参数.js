@@ -105,7 +105,7 @@
             portraitSize: '832×1216',
             landscapeSize: '1216×832',
             artist: '',         // 旧版的画师串，打开时自动搬进画风模板
-            styles: DEFAULT_STYLES, // 画风模板：{ id, name, prefix 前缀, suffix 后缀, negative 负面 }
+            styles: DEFAULT_STYLES, // 画风模板：{ id, name, prefix 前缀, quality 绑定的质量词, uc 绑定的负面提示词, suffix 后缀, negative 额外负面 }
             styleId: 'st_default',  // 当前用的模板，'' = 不用
             quality: '',        // 留空 = 模型默认
             negative: '',       // 留空 = 模型默认
@@ -123,7 +123,7 @@
     function normalize(s) {
         s = s || {};
         const nai = Object.assign({}, DEFAULTS.nai, s.nai);
-        nai.styles = (Array.isArray(nai.styles) ? nai.styles : []).map((x) => Object.assign({ id: '', name: '', prefix: '', suffix: '', negative: '' }, x));
+        nai.styles = (Array.isArray(nai.styles) ? nai.styles : []).map((x) => Object.assign({ id: '', name: '', prefix: '', quality: '', uc: '', suffix: '', negative: '' }, x));
         // 旧版只有一格画师串：搬成一套模板并选中
         if (String(nai.artist || '').trim()) {
             const id = 'st_' + Date.now().toString(36);
@@ -152,8 +152,12 @@
     /** 4.5 / V5 才吃英文自然语言描述 */
     const supportsNl = (m) => isV5(m) || isV45(m);
 
-    const qualityOf = (nai) => (nai.quality || '').trim() || QUALITY[nai.model] || '';
-    const negativeOf = (nai) => (nai.negative || '').trim() || NEGATIVE[nai.model] || '';
+    // 质量词 / 负面提示词的回落链（同柏宝绘的画风配方）：当前画风模板绑定的 → 「NAI 出图」页填的 → 模型默认
+    const styleOf = (nai) => (nai.styleId && (nai.styles || []).find((x) => x.id === nai.styleId)) || {};
+    const globalQuality = (nai) => (nai.quality || '').trim() || QUALITY[nai.model] || '';
+    const globalNegative = (nai) => (nai.negative || '').trim() || NEGATIVE[nai.model] || '';
+    const qualityOf = (nai) => String(styleOf(nai).quality || '').trim() || globalQuality(nai);
+    const negativeOf = (nai) => String(styleOf(nai).uc || '').trim() || globalNegative(nai);
 
     /** 解析「832×1216 / 832x1216 / 832*1216」；宽高须为 64 的倍数、256–2048 */
     function parseSize(text) {
@@ -172,6 +176,6 @@
 
     window.Params = {
         MODELS, QUALITY, NEGATIVE, SAMPLERS, NOISE, SIZES, DEFAULT_STYLES, NAI_OFFICIAL, DEFAULTS,
-        normalize, isV5, isV45, isV3, samplersFor, supportsNl, qualityOf, negativeOf, parseSize, modelLabel,
+        normalize, isV5, isV45, isV3, samplersFor, supportsNl, qualityOf, negativeOf, globalQuality, globalNegative, parseSize, modelLabel,
     };
 })();
