@@ -51,7 +51,7 @@ const fails = []; const ok = (c, m) => { if (!c) fails.push(m); console.log((c ?
   await page.click('#tabbar [data-tab="gallery"]');
   await page.waitForSelector('#g-chips');
   const chips = await page.$$eval('#g-chips button', (b) => b.map((x) => x.textContent));
-  ok(chips[0] === '全部' && chips[1] === '初音未来2' && chips.includes('小雪1') && chips.includes('将军1') && chips[chips.length - 1] === '作品博歌樂1', '筛选条：角色按张数排前，作品在后：' + chips.join(' / '));
+  ok(chips[0] === '全部4' && chips[1] === '初音未来2' && chips.includes('小雪1') && chips.includes('将军1') && chips[chips.length - 1] === '作品博歌樂1', '筛选条：角色按张数排前，作品在后：' + chips.join(' / '));
   await page.click('#g-chips button:nth-child(2)');
   await page.waitForFunction(() => document.querySelectorAll('.thumb').length === 2);
   ok((await page.textContent('.g-bar .card-sub')).includes('筛出 2 / 4'), '点「初音未来」只剩 2 张');

@@ -97,14 +97,14 @@
         if (sel) for (const id of [...sel]) if (!items.some((x) => x.id === id)) sel.delete(id);
         const favN = all.filter((x) => x.fav).length;
         const viewRow = '<div class="g-views"><div class="g-chips" id="g-views">'
-            + '<button data-view=""' + (filt.view ? '' : ' class="on"') + '>全部</button>'
+            + '<button data-view=""' + (filt.view ? '' : ' class="on"') + '>全部<span>' + all.length + '</span></button>'
             + '<button data-view="fav"' + (filt.view === 'fav' ? ' class="on"' : '') + '>★ 收藏<span>' + favN + '</span></button>'
             + albums.map((a) => '<button data-view="' + esc(a.id) + '"' + (filt.view === a.id ? ' class="on"' : '') + '>' + esc(a.name)
                 + '<span>' + all.filter((x) => (x.albums || []).includes(a.id)).length + '</span></button>').join('')
             + '<button data-view="+" class="add">＋ 相册</button></div>'
             + '<select id="g-sort" aria-label="排序">' + Gallery.SORTS.map(([k, t]) => '<option value="' + k + '"' + (k === p.sort ? ' selected' : '') + '>' + t + '</option>').join('') + '</select></div>';
         const filterRow = viewRow + '<div class="g-filter"><input type="search" id="g-q" placeholder="搜角色、描述、标签（中文英文都行）" value="' + esc(filt.q) + '">'
-            + (chipList.length ? '<div class="g-chips" id="g-chips"><button data-key=""' + (filt.key ? '' : ' class="on"') + '>全部</button>'
+            + (chipList.length ? '<div class="g-chips" id="g-chips"><button data-key=""' + (filt.key ? '' : ' class="on"') + '>全部<span>' + all.filter(inView).length + '</span></button>'
                 + chipList.map((c) => '<button data-key="' + esc(c.key) + '"' + (c.key === filt.key ? ' class="on"' : '') + ' title="' + esc(c.en || '') + '">'
                     + (c.kind === 'work' ? '<i>作品</i>' : '') + esc(c.label) + '<span>' + c.n + '</span></button>').join('') + '</div>'
                 + '<div class="g-hint">长按名字可以改中文名</div>' : '')
