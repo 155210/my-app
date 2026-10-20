@@ -1,10 +1,13 @@
 /*
  * 图库.js —— 图库数据：每张图的原图（Blob）和出图配方
  *
- *   gallery       索引数组（新的在前）：{ id, time, ext, bytes, origExt, thumb, desc, tag, nl, extraNegative, meta }
+ *   gallery       索引数组（新的在前）：{ id, time, ext, bytes, origExt, thumb, desc, tag, nl, extraNegative, meta,
+ *                 fav 收藏, albums 所在相册 id 数组, imported 外部导入, name 导入时的原文件名 }
+ *   galleryAlbums 相册（只是分组，不移动文件；一张图可以在多个相册里）：[{ id, name }]
  *   img:<id>      原图 Blob
  *   galleryPrefs  图库自己的偏好：{ size: 小/中/大/铺满, jpg: PNG 自动转 JPG, quality: JPG 质量,
- *                 save: 存到手机的位置 hidden/album/custom, saveTree / saveTreeName: 自选文件夹, saveHide: 自选文件夹里放 .nomedia }
+ *                 save: 存到手机的位置 hidden/album/custom, saveTree / saveTreeName: 自选文件夹, saveHide: 自选文件夹里放 .nomedia,
+ *                 sort: new/old/name/size 排序, nameRule: 保存到手机的文件名规则, nameCounter: {计数} 用到哪了 }
  * 界面在 页面-图库.js。
  *
  * NAI 出的 PNG 里自带出图信息（tEXt 的 Comment JSON + 透明通道最低位的「隐写」信息），
@@ -17,7 +20,14 @@
     let index = null;
 
     const SIZES = [['s', '小'], ['m', '中'], ['l', '大'], ['full', '铺满']];
-    const PREFS = { size: 'm', jpg: false, quality: 0.92, save: 'hidden', saveTree: '', saveTreeName: '', saveHide: true };
+    const NAME_RULE = '生图_{日期}_{时间}';
+    const PREFS = { size: 'm', jpg: false, quality: 0.92, save: 'hidden', saveTree: '', saveTreeName: '', saveHide: true, sort: 'new', nameRule: NAME_RULE, nameCounter: 0 };
+    const SORTS = [['new', '最新的在前'], ['old', '最早的在前'], ['name', '按名称'], ['size', '按大小（大的在前）']];
+    /** 文件名规则里能用的写法 */
+    const NAME_TOKENS = [
+        ['{日期}', '出图日期 20261020'], ['{时间}', '时间 153012'], ['{种子}', '种子'], ['{提示词}', '正面提示词前 40 个字'],
+        ['{描述}', '中文描述前 20 个字'], ['{模型}', '模型'], ['{尺寸}', '832x1216'], ['{计数}', '每存一张加 1：0001'],
+    ];
     const SAVE_MODES = [
         ['hidden', '隐藏文件夹（默认）', '下载/自然语言生图/图片/，系统相册里看不到，文件管理器里能找到'],
         ['album', '相册', '相册里的「自然语言生图」文件夹'],
@@ -82,9 +92,11 @@
 
     async function add(blob, ext, info) {
         const items = await list();
+        const keep = info && info.keepOriginal;
         const item = Object.assign({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), time: Date.now(), ext }, info);
+        delete item.keepOriginal;
         const p = await getPrefs();
-        if (p.jpg && String(ext).toLowerCase() === 'png') {
+        if (!keep && p.jpg && String(ext).toLowerCase() === 'png') {
             const jpg = await toJpg(blob, p.quality);
             if (jpg) { blob = jpg; item.origExt = 'png'; item.ext = 'jpg'; }
         }
@@ -239,10 +251,88 @@
         await Store.set('gallery', items);
     }
 
-    function fileName(item) {
+    // ------------------------------------------------------------
+    // 收藏、相册、排序
+    // ------------------------------------------------------------
+    let albumList = null;
+    async function albums() {
+        if (!albumList) albumList = await Store.get('galleryAlbums', []);
+        return albumList;
+    }
+    async function addAlbum(name) {
+        const list = await albums();
+        name = String(name || '').trim();
+        if (!name) throw new Error('相册名不能空着');
+        const a = { id: 'a' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), name };
+        list.push(a);
+        await Store.set('galleryAlbums', list);
+        return a;
+    }
+    async function renameAlbum(id, name) {
+        const a = (await albums()).find((x) => x.id === id);
+        if (!a || !String(name || '').trim()) return;
+        a.name = String(name).trim();
+        await Store.set('galleryAlbums', albumList);
+    }
+    /** 删相册：图不删，只是不再属于它 */
+    async function removeAlbum(id) {
+        albumList = (await albums()).filter((x) => x.id !== id);
+        await Store.set('galleryAlbums', albumList);
+        const items = await list();
+        items.forEach((x) => { if (x.albums) { x.albums = x.albums.filter((a) => a !== id); if (!x.albums.length) delete x.albums; } });
+        await Store.set('gallery', items);
+    }
+    /** 批量改：fav 收藏（true/false），或者 album + on 加进 / 移出相册 */
+    async function mark(ids, patch) {
+        const set = new Set(ids);
+        const items = await list();
+        for (const x of items) {
+            if (!set.has(x.id)) continue;
+            if ('fav' in patch) { if (patch.fav) x.fav = true; else delete x.fav; }
+            if (patch.album) {
+                const a = new Set(x.albums || []);
+                if (patch.on) a.add(patch.album); else a.delete(patch.album);
+                if (a.size) x.albums = [...a]; else delete x.albums;
+            }
+        }
+        await Store.set('gallery', items);
+    }
+    const sortName = (x) => String(x.name || x.desc || x.tag || '').trim();
+    /** 排好序的新数组（不改原来的顺序） */
+    function sorted(items, how) {
+        const a = items.slice();
+        if (how === 'old') a.sort((x, y) => x.time - y.time);
+        else if (how === 'name') a.sort((x, y) => (sortName(x) || '\uffff').localeCompare(sortName(y) || '\uffff', 'zh-Hans-CN') || y.time - x.time);
+        else if (how === 'size') a.sort((x, y) => (y.bytes || 0) - (x.bytes || 0) || y.time - x.time);
+        else a.sort((x, y) => y.time - x.time);
+        return a;
+    }
+
+    // ------------------------------------------------------------
+    // 文件名规则
+    // ------------------------------------------------------------
+    const cleanName = (s, n) => String(s || '').replace(/[\\/:*?"<>|\u0000-\u001f]/g, ' ').replace(/[\s,，]+/g, ' ').trim().slice(0, n).trim();
+    /** 按规则拼文件名（不含扩展名）；counter 给 {计数} 用 */
+    function nameByRule(item, rule, counter) {
         const d = new Date(item.time);
         const p = (n) => String(n).padStart(2, '0');
-        return '生图_' + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '_' + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds()) + '.' + (item.ext || 'png');
+        const m = item.meta || {};
+        const v = {
+            '日期': d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()),
+            '时间': p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds()),
+            '种子': m.seed != null ? String(m.seed) : '',
+            '提示词': cleanName(item.tag || m.positive, 40),
+            '描述': cleanName(item.desc, 20),
+            '模型': cleanName(window.Params && m.model ? Params.modelLabel(m.model) : m.model, 20),
+            '尺寸': m.width && m.height ? m.width + 'x' + m.height : '',
+            '计数': String(counter || 1).padStart(4, '0'),
+        };
+        let out = String(rule || NAME_RULE).replace(/\{(日期|时间|种子|提示词|描述|模型|尺寸|计数)\}/g, (_, k) => v[k]);
+        out = cleanName(out.replace(/_+/g, '_').replace(/^[_\s-]+|[_\s-]+$/g, ''), 120);
+        return out || nameByRule(item, NAME_RULE);
+    }
+    function fileName(item, counter) {
+        return nameByRule(item, (prefs || PREFS).nameRule, counter) + '.' + (item.ext || 'png');
     }
 
     /** 存到手机相册（App 里）/ 浏览器下载 */
@@ -250,13 +340,19 @@
         await getPrefs(); // 保证保存位置已经同步给外壳
         const blob = await getBlob(item.id);
         if (!blob) throw new Error('原图找不到了');
-        if (window.__saveBlob) return window.__saveBlob(blob, fileName(item));
+        let name = fileName(item);
+        if (/\{计数\}/.test(prefs.nameRule || '')) {
+            await setPrefs({ nameCounter: (prefs.nameCounter || 0) + 1 });
+            name = fileName(item, prefs.nameCounter);
+        }
+        if (window.__saveBlob) return window.__saveBlob(blob, name);
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
-        a.download = fileName(item);
+        a.download = name;
         a.click();
         return '浏览器下载';
     }
 
-    window.Gallery = { list, add, getBlob, remove, saveToPhone, fileName, getPrefs, setPrefs, convertAll, readInfo, removeMany, SIZES, SAVE_MODES };
+    window.Gallery = { list, add, getBlob, remove, saveToPhone, fileName, getPrefs, setPrefs, convertAll, readInfo, removeMany, SIZES, SAVE_MODES,
+        albums, addAlbum, renameAlbum, removeAlbum, mark, sorted, SORTS, nameByRule, NAME_RULE, NAME_TOKENS };
 })();
