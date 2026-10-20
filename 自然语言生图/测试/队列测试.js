@@ -129,13 +129,17 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   ok(await page.$eval('#c-cancel', (b) => b.hidden), '取消后「全部取消」按钮隐藏');
 
   // 单张取消：排 2 张，在面板里取消排队中的那张
-  delay = 600;
+  delay = 3000;
   await page.selectOption('#c-count', '2');
   await page.click('#c-draw');
   await page.click('#c-queue');
-  const btns = await page.$$('[data-q-list] [data-cancel]');
-  ok(btns.length === 2, '队列面板列出 2 张');
-  await btns[1].click();
+  await page.waitForSelector('.sheet [data-q-list]');
+  ok(await page.locator('[data-q-list] [data-cancel]').count() === 2, '队列面板列出 2 张');
+  // 面板里的行是复用的，状态变了按钮也不换；点「排队中」那一行的取消
+  const btnBefore = await page.$('[data-q-list] .q-item:nth-child(2) [data-cancel]');
+  await sleep(1100); // 让倒计时 / 状态刷新几次
+  ok(await btnBefore.evaluate((b) => b.isConnected), '面板刷新后按钮还是同一个（不会点了没反应）');
+  await page.locator('[data-q-list] .q-item', { hasText: '排队中' }).locator('[data-cancel]').click();
   await page.click('.sheet [data-close]');
   await idle();
   ok(await count() === b2 + 1, '取消排队中的 1 张，另 1 张照常出');
