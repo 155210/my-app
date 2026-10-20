@@ -108,6 +108,36 @@
     // ------------------------------------------------------------
     // 纠错：AI 写完的标签对照标签库
     // ------------------------------------------------------------
+    /** 标签库里的条目 [英文, 中文, 热度, 类别]，没有返回 null（要先 load） */
+    const get = (t) => (byName && byName.get(norm(t))) || null;
+
+    /**
+     * 输入联想：q 是英文（前缀优先，再是单词开头、包含）或中文（包含），返回最多 n 个条目，热的在前
+     * 别名（hires → highres）也算
+     */
+    function suggest(q, n) {
+        if (!tags) return [];
+        n = n || 12;
+        const raw = String(q || '').trim();
+        const k = norm(raw);
+        if (!k) return [];
+        const zh = /[\u4e00-\u9fff]/.test(raw);
+        const a = [], b = [], c = [], seen = new Set();
+        const push = (arr, t) => { if (!seen.has(t[0])) { seen.add(t[0]); arr.push(t); } };
+        const al = !zh && alias[k] && byName.get(alias[k]);
+        if (al) push(a, al);
+        for (const t of tags) {
+            if (zh) {
+                if (!t[1]) continue;
+                if (t[1].startsWith(raw)) push(a, t); else if (t[1].includes(raw)) push(c, t);
+            } else if (t[0].startsWith(k)) push(a, t);
+            else if (t[0].includes(' ' + k)) push(b, t);
+            else if (k.length >= 3 && t[0].includes(k)) push(c, t);
+            if (a.length >= n) break;
+        }
+        return a.concat(b, c).slice(0, n);
+    }
+
     /** 一个标签换成标签库里的写法；认不出返回 null */
     function canon(t) {
         const k = norm(t);
@@ -247,7 +277,8 @@
         return '<div class="tg-row' + (inPrompt.has(t[0]) ? ' on' : '') + '" data-t="' + esc(t[0]) + '">'
             + '<span class="tg-zh' + (zhEdited(t[0]) ? ' mine' : '') + '">' + (t[1] ? esc(t[1]) : '<i>' + (t[3] === 1 ? '画师' : '—') + '</i>') + '</span>'
             + '<span class="tg-en">' + esc(t[0]) + '</span>'
-            + '<span class="tg-n">' + (t[3] && t[3] !== 0 && ui.cat < 0 ? '<em>' + CAT_NAME[t[3]] + '</em>' : '') + fmtCount(t[2]) + '</span></div>';
+            + '<span class="tg-n">' + (t[3] && t[3] !== 0 && ui.cat < 0 ? '<em>' + CAT_NAME[t[3]] + '</em>' : '') + fmtCount(t[2]) + '</span>'
+            + (window.TagWiki ? '<span class="tg-i" title="说明">ⓘ</span>' : '') + '</div>';
     }
 
     function drawMore(L, reset) {
@@ -272,7 +303,7 @@
             + '<div class="tabs tg-cats">' + CATS.map((c) => '<button data-c="' + c.v + '">' + c.label + '</button>').join('') + '</div>'
             + '<div class="tg-sort"><span style="white-space:nowrap">排序</span><div class="seg"><button data-s="hot">热度↓</button><button data-s="cold">热度↑</button><button data-s="az">A-Z</button></div>'
             + '</div>'
-            + '<div class="tg-head"><span class="tg-zh">中文</span><span class="tg-en">英文标签</span><span class="tg-n">热度</span></div></div>'
+            + '<div class="tg-head"><span class="tg-zh">中文</span><span class="tg-en">英文标签</span><span class="tg-n">热度</span>' + (window.TagWiki ? '<span class="tg-i"></span>' : '') + '</div></div>'
             + '<div class="page-body tg-body"><div class="tg-list"></div><div class="empty tg-empty" hidden>没有找到</div></div>'
             + '<div class="tg-foot"><span></span><button class="btn primary" data-close>完成</button></div>');
         const mark = () => {
@@ -318,6 +349,8 @@
         list.addEventListener('contextmenu', (e) => { if (e.target.closest('[data-t]')) e.preventDefault(); });
         list.addEventListener('click', (e) => {
             if (lpFired) { lpFired = false; return; }
+            const info = e.target.closest('.tg-i');
+            if (info && window.TagWiki) { TagWiki.open(info.parentNode.dataset.t); return; }
             const row = e.target.closest('[data-t]');
             if (!row) return;
             if (!promptBox()) { UI.copyText(row.dataset.t); return; }
@@ -336,6 +369,7 @@
         + '.tg-head{font-size:12px;padding:8px 4px 6px}.tg-head span{color:var(--faint)}'
         + '.tg-zh{flex:1 1 0;min-width:0;overflow-wrap:anywhere}.tg-zh i{color:var(--faint);font-style:normal}.tg-zh.mine{color:var(--accent)}.tg-zh.mine::after{content:" ✎";font-size:11px}'
         + '.tg-row{-webkit-touch-callout:none;user-select:none;-webkit-user-select:none}'
+        + '.tg-i{flex:none;width:26px;margin-right:-6px;text-align:center;color:var(--faint);font-size:16px}'
         + '.tg-en{flex:1.3 1 0;min-width:0;overflow-wrap:anywhere;color:var(--dim)}'
         + '.tg-n{flex:none;width:68px;text-align:right;font-size:12px;color:var(--faint)}.tg-n em{font-style:normal;margin-right:4px;color:var(--dim)}'
         + '.tg-body{padding:0 12px calc(12px + var(--safe-bottom))}'
@@ -348,7 +382,7 @@
     function addEntry() {
         const box = promptBox();
         if (!box || $('#c-tag-lib')) return;
-        const label = box.parentNode.querySelector('label');
+        const label = (box.closest('.field') || box.parentNode).querySelector('label');
         if (!label) return;
         label.insertAdjacentHTML('beforeend', '<a href="#" id="c-tag-lib" class="tg-entry">标签库</a>');
         $('#c-tag-lib').addEventListener('click', (e) => { e.preventDefault(); open(); });
@@ -364,6 +398,10 @@
             + '<div class="help">从中文描述里找出标签库认识的词（比如「黑发」「初音未来」），把标准英文写法一起发给 AI</div></span></label>'
             + '<label class="check"><span class="switch"><input type="checkbox" data-k="tags.fix"><span></span></span><span>AI 写完自动纠正标签写法'
             + '<div class="help">对照标签库改掉错拼、别名、单复数（hires → highres），去掉重复的；标签库里没有的标签原样保留</div></span></label>'
+            + '<label class="check"><span class="switch"><input type="checkbox" data-k="tags.complete"><span></span></span><span>手打提示词时联想标签'
+            + '<div class="help">在提示词格子里打字（中文英文都行），下面出一排候选，点一下换上；还有调权重的 − ＋ 和看说明的 ⓘ</div></span></label>'
+            + '<label class="check"><span class="switch"><input type="checkbox" data-k="tags.highlight"><span></span></span><span>提示词语法高亮'
+            + '<div class="help">加权橙色、减权蓝色、负权重红色、画师紫色、通配符绿色，标签库里没有的标签带虚下划线（改完重开设置页生效）</div></span></label>'
             + '<div class="btns" style="justify-content:flex-start"><button class="btn primary" data-act="tags-open">打开标签库</button></div>'
             + '<div class="help" style="margin-top:14px">标签和热度来自 NAIWeaver 的标签表（Danbooru），中文翻译来自 a1111-sd-webui-tagcomplete-CN、BooruTagCart，缺的部分手动补译。</div>',
         acts: { 'tags-open': () => open() },
@@ -372,5 +410,5 @@
     // 启动后空闲时先把数据读进来，第一次写提示词就能用上
     setTimeout(() => load().catch((e) => console.warn(e)), 1500);
 
-    window.TagLib = { load, fix, canon, candidates, open, setZh, editZh, zhEdited, origZh, onZhChange: (fn) => zhListeners.push(fn), get loaded() { return !!tags; } };
+    window.TagLib = { load, get, suggest, norm, fix, canon, candidates, open, setZh, editZh, zhEdited, origZh, onZhChange: (fn) => zhListeners.push(fn), get loaded() { return !!tags; } };
 })();

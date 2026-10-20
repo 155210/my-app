@@ -115,7 +115,7 @@
         // 留空 = 内置（规范见 写词.js，破限词、思维链见 自定义提示词.js）；heavy = 重型提示词（酒馆预设），打开时在 自定义提示词.js 里补全
         prompts: { system: '', jailbreak: '', thinking: '', useJailbreak: true, useThinking: true, retries: 1, heavy: null },
         autoDraw: true,          // 写完提示词自动出图
-        tags: { hint: true, fix: true }, // 标签库：给 AI 参考标签、写完纠错（见 标签库.js）
+        tags: { hint: true, fix: true, complete: true, highlight: true }, // 标签库：给 AI 参考标签、写完纠错（见 标签库.js）；联想、高亮（提示词编辑.js）；wildcards 通配符（通配符.js）
         chars: { inject: true, autoCreate: true, autoUpdate: true }, // 角色库：外貌发给 AI、自动建档、永久变化自动更新（见 角色库.js）
     };
 
