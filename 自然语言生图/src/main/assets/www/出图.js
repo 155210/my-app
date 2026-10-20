@@ -181,7 +181,7 @@
         return { blob: new Blob([bytes], { type }), ext, meta };
     }
 
-    /** 查订阅：返回 { tier, active, anlas }；站点没有这个接口 → null */
+    /** 查订阅：返回 { tier, active, anlas, usage }；站点没有这个接口 → null */
     async function subscription(nai) {
         if (!String(nai.key || '').trim()) throw new Error('请先填 Key');
         const base = String(nai.url || '').trim().replace(/\/+$/, '');
@@ -213,19 +213,43 @@
         const steps = d.trainingStepsLeft;
         const anlas = typeof steps === 'number' ? steps
             : (Number(steps && steps.fixedTrainingStepsLeft) || 0) + (Number(steps && steps.purchasedTrainingSteps) || 0);
-        return { tier, active: d.active !== false, anlas };
+        return { tier, active: d.active !== false, anlas, usage: opusUsage(d.usage) };
+    }
+
+    /**
+     * Opus 的 V5 免费额度（官网「Opusの利用上限」那条）：只有官方出图域名、Opus 订阅才有
+     * usage: { percent 剩余 0–100, isNegative 已透支（V5 每张都扣 Anlas）, timeUntilNextPercent 每回 1% 要几秒 }
+     * 张数按官网口径：1% ≈ 17.3 张
+     */
+    function opusUsage(u) {
+        if (!u || typeof u.percent !== 'number') return null;
+        const left = u.isNegative ? 0 : Math.max(0, Math.min(100, u.percent));
+        const secs = Number(u.timeUntilNextPercent) || 0;
+        const perDay = secs > 0 ? Math.round(86400 / secs * 10) / 10 : 0;
+        return {
+            percent: Math.round(left), empty: !!u.isNegative || left <= 0,
+            imagesLeft: Math.round(17.3 * left), perDay, imagesPerDay: Math.round(17.3 * perDay),
+        };
+    }
+
+    /** 额度的中文说明，提示和设置页共用 */
+    function usageText(u) {
+        if (!u) return '';
+        const refill = u.perDay ? '，每天回 ' + u.perDay + '%（约 ' + u.imagesPerDay + ' 张）' : '';
+        return u.empty ? 'Opus 免费额度用完了，现在每张 V5 都扣 Anlas' + refill
+            : 'Opus 免费额度剩 ' + u.percent + '%（约 ' + u.imagesLeft + ' 张）' + refill;
     }
 
     /** 测试连接：官方站查订阅和 Anlas 余额；第三方站没有这个接口就只验证能连上 */
     async function test(nai) {
         const d = await subscription(nai);
         if (!d) return '能连上，但这个站没有订阅接口；以实际出图为准';
-        window.dispatchEvent(new CustomEvent('nai-anlas', { detail: d.anlas }));
-        return '连接正常：' + d.tier + (d.active ? '' : '（订阅未激活）') + '，Anlas 余额 ' + d.anlas;
+        window.dispatchEvent(new CustomEvent('nai-anlas', { detail: d }));
+        return '连接正常：' + d.tier + (d.active ? '' : '（订阅未激活）') + '，Anlas 余额 ' + d.anlas + (d.usage ? '\n' + usageText(d.usage) : '');
     }
 
     // lastSeed：最近出的一张的种子（锁定种子用）
     const state = { lastSeed: 0 };
 
-    window.Nai = { generate, test, subscription, buildBody, fullPrompts, activeStyle, unzipFirstImage, endpoint, addHook, state };
+    window.Nai = { generate, test, subscription, usageText, buildBody, fullPrompts, activeStyle, unzipFirstImage, endpoint, addHook, state };
 })();

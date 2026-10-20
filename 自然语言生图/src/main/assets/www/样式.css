@@ -187,4 +187,5 @@ pre.recipe { margin: 0 0 12px; padding: 8px 10px; border-radius: 10px; backgroun
 .quickbar .field { margin: 0; }
 .quickbar select, .quickbar .btn { padding-top: 8px; padding-bottom: 8px; }
 #anlas-chip { background: none; padding: 2px 8px; font-size: 12px; }
+#anlas-chip.low { color: var(--danger); border-color: rgba(224, 100, 92, .5); }
 .style-card.on { border-color: rgba(226, 166, 91, .6); }

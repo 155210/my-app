@@ -20,13 +20,13 @@ const json = (o, status) => ({ status: status || 200, headers: { ...CORS, 'conte
   const browser = await chromium.launch(process.env.CHROME ? { executablePath: process.env.CHROME } : {});
   const page = await browser.newPage();
   page.on('pageerror', (e) => fails.push('页面报错 ' + e.message));
-  let imageMode = 'ok'; const hits = [];
+  let imageMode = 'ok'; const hits = []; let usage = { percent: 75, isNegative: false, timeUntilNextPercent: 7854 };
   await page.route('https://image.novelai.net/**', (r) => {
     if (r.request().method() === 'OPTIONS') return r.fulfill({ status: 204, headers: CORS });
     hits.push(r.request().url());
     if (imageMode === '404') return r.fulfill({ status: 404, headers: CORS, body: '' });
     if (imageMode === '401') return r.fulfill(json({ message: 'Unauthorized' }, 401));
-    return r.fulfill(json({ tier: 3, active: true, trainingStepsLeft: { fixedTrainingStepsLeft: 10000, purchasedTrainingSteps: 50 } }));
+    return r.fulfill(json({ tier: 3, active: true, trainingStepsLeft: { fixedTrainingStepsLeft: 10000, purchasedTrainingSteps: 50 }, usage: usage }));
   });
   await page.route('https://api.novelai.net/**', (r) => {
     if (r.request().method() === 'OPTIONS') return r.fulfill({ status: 204, headers: CORS });
@@ -44,6 +44,16 @@ const json = (o, status) => ({ status: status || 200, headers: { ...CORS, 'conte
   let msg = await run();
   ok(/Opus/.test(msg) && /10050/.test(msg), '官方站：走 image.novelai.net/user/subscription，显示 Anlas：' + msg);
   ok(hits[0] === 'https://image.novelai.net/user/subscription' && !hits.some((u) => u.includes('api.novelai.net')), '查到了就不再请求 api.novelai.net');
+
+  ok(/剩 75%（约 1298 张），每天回 11%（约 190 张）/.test(msg), 'Opus 免费额度：剩余、每天回复多少');
+  ok(await page.$eval('#anlas-chip', (c) => c.textContent) === 'Anlas 10050 · Opus 75%', '顶栏同时显示 Anlas 和 Opus 额度');
+
+  usage = { percent: -3, isNegative: true, timeUntilNextPercent: 7854 };
+  msg = await run();
+  ok(/用完了/.test(msg) && await page.$eval('#anlas-chip', (c) => c.textContent.endsWith('Opus 0%') && c.classList.contains('low')), '额度透支时显示 0% 并标红：' + msg);
+  usage = undefined;
+  msg = await run();
+  ok(!/Opus 免费/.test(msg) && await page.$eval('#anlas-chip', (c) => c.textContent) === 'Anlas 10050', '不是 Opus（没有 usage）时只显示 Anlas');
 
   imageMode = '404'; hits.length = 0;
   msg = await run();
