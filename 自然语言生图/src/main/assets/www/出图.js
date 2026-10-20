@@ -43,7 +43,7 @@
     const addTagFilter = (fn) => tagFilters.push(fn);
 
     // 扩展口：多角色、Vibe 等功能各自在自己的文件里 Nai.addHook(fn)，
-    // fn(params, nai, p) 直接改 parameters，不用改这个文件
+    // fn(params, nai, p, extra) 直接改 parameters，不用改这个文件；往 extra 里放的东西会记进这张图的配方（meta）
     const hooks = [];
     const addHook = (fn) => hooks.push(fn);
 
@@ -97,14 +97,15 @@
                 v4_negative_prompt: { caption: { base_caption: negative, char_captions: [] }, legacy_uc: false },
             });
         }
-        hooks.forEach((h) => h(params, nai, p));
+        const extra = {};
+        hooks.forEach((h) => h(params, nai, p, extra));
         if (sampler === 'k_euler_ancestral') {
             params.deliberate_euler_ancestral_bug = false;
             params.prefer_brownian = true;
         }
         return {
             body: { input: positive, model: nai.model, action: 'generate', parameters: params, use_new_shared_trial: true },
-            meta: { positive, negative, width, height, seed, model: nai.model, sampler, steps: params.steps, scale: params.scale, size: orientation, style: (activeStyle(nai) || {}).name || '' },
+            meta: Object.assign({ positive, negative, width, height, seed, model: nai.model, sampler, steps: params.steps, scale: params.scale, size: orientation, style: (activeStyle(nai) || {}).name || '' }, extra),
         };
     }
 

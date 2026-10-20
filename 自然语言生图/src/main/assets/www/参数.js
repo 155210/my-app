@@ -110,6 +110,7 @@
             quality: '',        // 留空 = 模型默认
             negative: '',       // 留空 = 模型默认
             naturalLanguage: true,
+            vibes: [],          // 画风参考图：{ id, name, on, strength 强度, info 信息提取量 }；图和编码另存在 vibe:<id>（见 参考图.js）
         },
         prompts: { system: '' }, // 留空 = 内置规范（见 写词.js）
         autoDraw: true,          // 写完提示词自动出图
@@ -129,6 +130,7 @@
             nai.styleId = id;
         }
         nai.artist = '';
+        nai.vibes = (Array.isArray(nai.vibes) ? nai.vibes : []).filter((x) => x && x.id).map((x) => Object.assign({ name: '', on: true, strength: 0.6, info: 1 }, x));
         if (nai.styleId && !nai.styles.some((x) => x.id === nai.styleId)) nai.styleId = '';
         if (!MODELS.some((m) => m.value === nai.model)) nai.model = DEFAULTS.nai.model;
         return {
