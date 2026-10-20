@@ -306,3 +306,12 @@ pre.recipe { margin: 0 0 12px; padding: 8px 10px; border-radius: 10px; backgroun
 .act-item .row { gap: 6px; margin-bottom: 6px; }
 .act-item select { width: auto; flex: 1; min-width: 0; padding: 6px 4px; }
 .act-item input[type=text] { padding: 6px 8px; min-width: 0; }
+
+/* 图库：人物标签那一排 + 全部列表 */
+.g-chiprow { display: flex; align-items: center; gap: 6px; }
+.g-chiprow .g-chips { flex: 1; min-width: 0; }
+.g-chiprow > .btn.small { flex: none; margin-top: 6px; padding: 3px 9px; }
+.g-chips.wrap { flex-wrap: wrap; overflow: visible; padding-top: 4px; }
+.g-cp-q { width: 100%; border: 1px solid var(--line); background: var(--bg); border-radius: 10px; padding: 7px 11px; outline: none; margin-bottom: 4px; }
+.g-cp-q:focus { border-color: var(--accent); }
+.g-cp-body { max-height: 55vh; overflow-y: auto; }
