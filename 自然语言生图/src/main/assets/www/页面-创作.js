@@ -1,5 +1,8 @@
 /*
  * 页面-创作.js —— 创作页：写中文描述 → AI 写提示词（可改）→ 出图
+ *
+ * 「拆成多张」选了张数时，AI 写提示词改成一段描述规划多张（结果卡片在 规划.js）；
+ * 「AI 重写」照当前提示词重写一遍，可以附一句要求。
  */
 (function () {
     'use strict';
@@ -8,7 +11,7 @@
     const root = () => $('#view-create');
 
     // 草稿：描述和提示词，切走、重开 App 都还在
-    let draft = { desc: '', tag: '', nl: '', negative: '', size: 'portrait', count: 1 };
+    let draft = { desc: '', tag: '', nl: '', negative: '', size: 'portrait', count: 1, plan: '', hint: '' };
     let writing = null;   // 正在写提示词时的 AbortController
     let results = [];     // 本次打开后出的图，最新的在前，最多显示 RESULT_MAX 张
     const RESULT_MAX = 4;
@@ -18,6 +21,8 @@
         clearTimeout(saveTimer);
         saveTimer = setTimeout(() => Store.set('draft', draft), 300);
     }
+
+    const PLAN_OPTS = [['', '不拆，写一张'], ['auto', 'AI 定张数']].concat([2, 3, 4, 5, 6].map((n) => [String(n), '拆成 ' + n + ' 张']));
 
     function nlVisible() {
         const n = UI.settings.nai;
@@ -31,6 +36,10 @@
             + '<div class="row" style="margin-top:10px">'
             + '<label class="check grow" style="margin:0"><span class="switch"><input type="checkbox" id="c-auto"><span></span></span><span>写完自动出图</span></label>'
             + '<button class="btn primary" id="c-write">AI 写提示词</button></div>'
+            + '<div class="row" style="margin-top:8px">'
+            + '<select id="c-plan" style="width:auto;padding:6px 4px" aria-label="一段描述拆成多张">' + PLAN_OPTS.map((o) => '<option value="' + o[0] + '">' + o[1] + '</option>').join('') + '</select>'
+            + '<label class="check grow" style="margin:0;justify-content:flex-end" id="c-nlsw-wrap"><span id="c-nlsw-text" style="font-size:13px;color:var(--dim)">英文描述</span>'
+            + '<span class="switch"><input type="checkbox" id="c-nlsw"><span></span></span></label></div>'
             + '<pre class="live" id="c-live" hidden></pre>'
             + '</div>'
 
@@ -41,6 +50,7 @@
             + '<div class="row">'
             + '<div class="seg" id="c-size" style="flex-shrink:0"><button data-v="portrait">竖图</button><button data-v="landscape">横图</button></div>'
             + '<span class="grow"></span>'
+            + '<button class="btn" id="c-rewrite">AI 重写</button>'
             + '<button class="btn" id="c-preview">实际发送</button>'
             + '<select id="c-count" style="width:auto;padding:8px 4px" aria-label="一次出几张">' + [1, 2, 3, 4].map((v) => '<option value="' + v + '">' + v + ' 张</option>').join('') + '</select>'
             + '<button class="btn primary" id="c-draw">出图</button></div>'
@@ -48,6 +58,7 @@
             + '<button class="btn small" id="c-queue" hidden>队列</button><button class="btn small danger" id="c-cancel" hidden>全部取消</button></div>'
             + '</div>'
 
+            + '<div id="c-plan-box"></div>'
             + '<div id="c-result"></div>';
     }
 
@@ -59,14 +70,21 @@
         $('#c-neg', r).value = draft.negative;
         $('#c-auto', r).checked = UI.settings.autoDraw;
         $('#c-count', r).value = String(draft.count || 1);
+        $('#c-plan', r).value = draft.plan || '';
         refresh();
     }
 
+    let refilling = false;
     /** 设置改了以后刷新（模型变了，英文描述那格要不要显示） */
     function refresh() {
         const r = root();
         if (!r || !$('#c-tag', r)) return;
         $('#c-nl-wrap', r).hidden = !nlVisible();
+        // 「生成英文描述」开关（同设置里那个）；V4 / V3 不吃英文句子，开关灰掉
+        const nlOk = Params.supportsNl(UI.settings.nai.model);
+        $('#c-nlsw', r).checked = !!UI.settings.nai.naturalLanguage && nlOk;
+        $('#c-nlsw', r).disabled = !nlOk;
+        $('#c-nlsw-text', r).textContent = nlOk ? '生成英文描述' : '英文描述（这个模型不支持）';
         UI.$$('#c-size button', r).forEach((b) => b.classList.toggle('on', b.dataset.v === draft.size));
         const s = UI.settings;
         const q = Queue.state();
@@ -80,12 +98,14 @@
         $('#c-queue', r).hidden = !busy && !q.failed;
         $('#c-queue', r).textContent = q.failed && !busy ? '失败 ' + q.failed + ' 张' : '队列';
         $('#c-cancel', r).hidden = !busy;
-        Queue.refill(); // 设置里改了并发数
+        // 设置里改了并发数；refill 会通知队列变化又调回 refresh，防一下套娃（以前每次 refresh 要套一千多层到爆栈）
+        if (!refilling) { refilling = true; try { Queue.refill(); } finally { refilling = false; } }
         $('#c-status', r).textContent = qs
             + Params.modelLabel(s.nai.model) + ' · ' + (draft.size === 'landscape' ? s.nai.landscapeSize : s.nai.portraitSize)
             + (Number(s.nai.seed) > 0 ? ' · 种子 ' + s.nai.seed : '');
-        $('#c-write', r).textContent = writing ? '停止' : 'AI 写提示词';
+        $('#c-write', r).textContent = writing ? '停止' : draft.plan ? 'AI 拆成多张' : 'AI 写提示词';
         $('#c-write', r).classList.toggle('danger', !!writing);
+        $('#c-rewrite', r).disabled = !!writing;
     }
 
     function bind() {
@@ -103,9 +123,14 @@
         on('#c-queue', 'click', () => Queue.openPanel());
         on('#c-cancel', 'click', () => Queue.cancelAll());
         on('#c-preview', 'click', preview);
+        on('#c-rewrite', 'click', askRewrite);
+        on('#c-plan', 'change', (e) => { draft.plan = e.target.value; saveDraft(); refresh(); });
+        on('#c-nlsw', 'change', (e) => { UI.settings.nai.naturalLanguage = e.target.checked; UI.saveSettings(); refresh(); });
     }
 
-    async function write() {
+    /** 调一次 AI（写 / 拆多张 / 重写）：AI 的输出边写边显示在描述下面，期间按钮变「停止」 */
+    async function runAi(opt, done, what) {
+        if (writing) return;
         const r = root();
         const live = $('#c-live', r);
         writing = new AbortController();
@@ -114,23 +139,62 @@
         refresh();
         Queue.Busy.on();
         try {
-            const res = await Writer.run({
+            const res = await Writer.run(Object.assign({
                 settings: UI.settings, text: draft.desc, signal: writing.signal,
                 onDelta: (c) => { live.textContent = c || 'AI 正在写…'; live.scrollTop = live.scrollHeight; },
-            });
-            Object.assign(draft, { tag: res.tag, nl: res.nl, negative: res.negative, size: res.size });
-            saveDraft();
-            fill();
+            }, opt));
             live.hidden = true;
-            if (UI.settings.autoDraw) draw();
+            done(res);
         } catch (e) {
             if (e.name === 'AbortError') { live.hidden = true; toast('info', '已停止'); }
-            else { live.textContent = '出错了：' + (e.message || e); toast('error', e.message || String(e), '写提示词失败'); }
+            else { live.textContent = '出错了：' + (e.message || e); toast('error', e.message || String(e), what + '失败'); }
         } finally {
             writing = null;
             Queue.Busy.off();
             refresh();
         }
+    }
+
+    function apply(res) {
+        Object.assign(draft, { tag: res.tag, nl: res.nl, negative: res.negative, size: res.size });
+        saveDraft();
+        fill();
+    }
+
+    function write() {
+        if (draft.plan) {
+            const desc = draft.desc;
+            return runAi({ plan: draft.plan === 'auto' ? 0 : Number(draft.plan) }, (res) => {
+                Planner.show(desc, res.images);
+                if (UI.settings.autoDraw) Planner.drawAll();
+            }, 'AI 拆多张');
+        }
+        return runAi({}, (res) => { apply(res); if (UI.settings.autoDraw) draw(); }, '写提示词');
+    }
+
+    /** AI 重写：照现在框里的提示词重写，可以附一句要求（比如「表情再害羞一点」） */
+    function askRewrite() {
+        if (writing) return;
+        if (!String(draft.tag).trim() && !String(draft.desc).trim()) { toast('warning', '先写描述或提示词'); return; }
+        const L = UI.openLayer('dialog', '<h3>AI 重写提示词</h3>'
+            + '<p>照现在框里的提示词，把同一个画面重写一遍。想改哪里可以写一句（不写也行）。</p>'
+            + '<div class="field"><textarea class="ta small" data-hint placeholder="比如：表情再害羞一点 / 换成全身 / 加上下雨"></textarea></div>'
+            + '<div class="btns"><button class="btn" data-close>取消</button><button class="btn primary" data-go>重写</button></div>');
+        const ta = $('[data-hint]', L.box);
+        ta.value = draft.hint || '';
+        $('[data-go]', L.box).onclick = () => {
+            draft.hint = ta.value.trim();
+            saveDraft();
+            UI.closeLayer(L);
+            rewrite(draft.hint);
+        };
+    }
+
+    function rewrite(hint) {
+        return runAi({
+            text: String(draft.desc).trim() || '（没有中文描述，照下面当前的提示词重写）',
+            rewrite: { tag: draft.tag, nl: nlVisible() ? draft.nl : '', negative: draft.negative, hint },
+        }, (res) => { apply(res); toast('success', '重写好了' + (UI.settings.autoDraw ? '，开始出图' : '')); if (UI.settings.autoDraw) draw(); }, 'AI 重写');
     }
 
     const randomSeed = () => Math.floor(Math.random() * 2 ** 32);
@@ -142,21 +206,24 @@
     function draw(p, count) {
         p = p || { desc: draft.desc, tag: draft.tag, nl: draft.nl, negative: draft.negative, size: draft.size };
         count = count || Number(draft.count) || 1;
-        if (!String(p.tag || '').trim()) { toast('warning', '正面提示词是空的，先让 AI 写或者自己填'); return; }
+        if (!String(p.tag || '').trim()) { toast('warning', '正面提示词是空的，先让 AI 写或者自己填'); return null; }
         // 先校验尺寸等，免得排进队才报错
-        try { Nai.buildBody(UI.settings.nai, p); } catch (e) { toast('error', e.message); return; }
+        try { Nai.buildBody(UI.settings.nai, p); } catch (e) { toast('error', e.message); return null; }
         const nai = Object.assign({}, UI.settings.nai); // 排队期间改设置不影响这批
         const locked = Number(nai.seed) > 0 ? Number(nai.seed) : 0;
-        const name = String(p.desc || p.tag).trim().replace(/\s+/g, ' ').slice(0, 24);
+        const name = p.label || String(p.desc || p.tag).trim().replace(/\s+/g, ' ').slice(0, 24);
+        const jobs = [];
         for (let i = 0; i < count; i++) {
             const one = Object.assign({}, p);
+            delete one.label;
             if (one.seed == null && locked && count > 1) one.seed = (locked + i) % 2 ** 32;
-            enqueue(nai, one, name + (count > 1 ? '（' + (i + 1) + '/' + count + '）' : ''));
+            jobs.push(enqueue(nai, one, name + (count > 1 ? '（' + (i + 1) + '/' + count + '）' : '')));
         }
+        return jobs; // 每张一个 Promise（出好是图库里那一项），批量页用来跟踪
     }
 
     function enqueue(nai, p, label) {
-        Queue.add(async (signal) => {
+        const job = Queue.add(async (signal) => {
             const out = await Nai.generate(nai, p, signal);
             return Gallery.add(out.blob, out.ext, {
                 desc: p.desc || '', tag: p.tag, nl: p.nl || '', extraNegative: p.negative || '', meta: out.meta,
@@ -165,18 +232,20 @@
             label,
             // 失败后在队列里点「重试」：同一套提示词、同一个种子（如果原来指定了）再排一次
             retry: () => enqueue(nai, p, label),
-        }).then((item) => {
+        });
+        job.then((item) => {
             results = [item].concat(results.filter((x) => x.id !== item.id)).slice(0, RESULT_MAX);
             showResult();
             if (window.GalleryPage) GalleryPage.refresh();
         }).catch((e) => {
             if (e.name !== 'AbortError') toast('error', e.message || String(e), '出图失败');
         }).finally(refresh);
+        return job;
     }
 
     /** 重绘：同一套提示词（连同那张图的角色）换个种子再出一张 */
     function redraw(item) {
-        draw({ desc: item.desc, tag: item.tag, nl: item.nl, negative: item.extraNegative, size: item.meta.size, seed: randomSeed(), characters: item.meta.characters || [] }, 1);
+        return draw({ desc: item.desc, tag: item.tag, nl: item.nl, negative: item.extraNegative, size: item.meta.size, seed: randomSeed(), characters: item.meta.characters || [] }, 1);
     }
 
     let urls = [], showSeq = 0;
@@ -220,13 +289,13 @@
             + '<div class="btns"><button class="btn" data-close>关闭</button></div>');
     }
 
-    /** 从图库「用这套重画」：把配方填回来 */
-    function reuse(item) {
-        Object.assign(draft, { desc: item.desc || draft.desc, tag: item.tag, nl: item.nl || '', negative: item.extraNegative || '', size: item.meta.size || 'portrait' });
+    /** 从图库「用这套重画」、批量页「填到创作页」、拆多张的「填到上面」：把这套提示词填回来 */
+    function reuse(item, quiet) {
+        Object.assign(draft, { desc: item.desc || draft.desc, tag: item.tag, nl: item.nl || '', negative: item.extraNegative || item.negative || '', size: (item.meta && item.meta.size) || item.size || 'portrait' });
         saveDraft();
         fill();
         UI.showTab('create');
-        toast('info', '已填回创作页，改完点「出图」');
+        if (!quiet) toast('info', '已填回创作页，改完点「出图」');
     }
 
     async function init() {
@@ -237,5 +306,5 @@
         Queue.onChange(refresh);
     }
 
-    window.CreatePage = { init, refresh, reuse, draw, redraw };
+    window.CreatePage = { init, refresh, reuse, draw, redraw, get draft() { return draft; }, get busy() { return !!writing; } };
 })();

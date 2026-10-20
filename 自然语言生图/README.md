@@ -23,6 +23,7 @@ PR 上也会打包，但只放在 Actions 的附件里，不发 Release。
 ├── 测试/标签库测试.js          标签库的测试
 ├── 测试/角色库测试.js          角色库：建档、名字换外貌、AI 自动建档/永久变化、全局角色、撤销
 ├── 测试/自定义提示词测试.js    破限词/规范/思维链、重型提示词（酒馆预设）的测试
+├── 测试/批量测试.js          拆成多张、AI 重写（附要求）、创作页英文描述开关、批量页
 ├── 工具/做标签库.py            生成 依赖/标签.json（换数据源时才跑）；工具/标签补译.txt 是手动补的中文
 └── src/main/
     ├── java/com/example/nlimage/   从自制AI问答机照搬的外壳
@@ -37,7 +38,7 @@ PR 上也会打包，但只放在 Actions 的附件里，不发 Release。
         ├── 存储.js               IndexedDB：settings / draft / gallery / img:<id>
         ├── 接口.js               OpenAI 兼容接口：拉模型列表、对话（流式/非流式）（同问答机）
         ├── 参数.js               【出图参数】模型表（V5/V4.5/V4/V3）、默认质量词/负面词、采样器、尺寸预设、默认设置
-        ├── 写词.js               【AI 流水线】内置规范、拼消息、解析 JSON、格式不对自动重试
+        ├── 写词.js               【AI 流水线】内置规范、拼消息、解析 JSON、格式不对自动重试；拆成多张（plan）、重写（rewrite）
         ├── 出图.js               【NAI】拼请求 body、解 zip、测试连接查 Anlas
         ├── 队列.js               【队列】并发数可调、429 限流自动等待重试、单张/全部取消、失败重试、队列面板、设置页「出图队列」
         ├── 图库.js               【图库数据】存图（可选转 JPG，默认关以保留 NAI 信息）、缩略图、配方、存相册、读图片里的 NAI 信息、图库偏好 galleryPrefs
@@ -48,7 +49,9 @@ PR 上也会打包，但只放在 Actions 的附件里，不发 Release。
         ├── 多角色.js             【多角色】创作页「多角色」卡片：每个角色单独正面/负面、站位，进 char_captions（V4 起）
         ├── 参考图.js             【画风参考】创作页「画风参考图」卡片：Vibe 强度、信息提取量，自动编码，导入导出 .naiv4vibe
         ├── 快捷栏.js             创作页的模型/画风/尺寸/锁种子快捷栏（包一层 CreatePage，不改创作页文件）+ 顶栏 Anlas 余额
-        ├── 页面-创作.js          创作页
+        ├── 页面-创作.js          创作页（AI 写 / 拆多张 / 重写都走 runAi，输出实时显示；英文描述开关）
+        ├── 规划.js               【拆成多张】AI 拆好的结果卡片：填到上面、出这张、全部出图（存 plan 键）
+        ├── 页面-批量.js          【批量页】一行一条描述，挨个写提示词、写完一条出一条（存 batch 键）
         ├── 页面-图库.js          图库页（四档大小、长按菜单）、大图（左右滑、双指/双击缩放、长按保存、上滑配方）、完整配方、读取图片信息
         ├── 备份.js               设置导出 / 导入（设置页「备份」标签，图库不进备份）
         ├── 更新.js               检查更新：查 Releases 里最新 shengtu-N，和本机 1.0.N 比，交给浏览器下载
@@ -70,10 +73,12 @@ PR 上也会打包，但只放在 Actions 的附件里，不发 Release。
 - 新设置字段加在 `参数.js` 的 `DEFAULTS` 里，老用户打开时自动补上。
 - 队列的设置（`nai.concurrency`、`nai.retry429`、`nai.maxRetries`）没进 `DEFAULTS`，默认值在 `队列.js` 的 `CFG_DEFAULTS`。
 - `Queue.add(fn, { label, retry })`：排一张进队列；`label` 显示在队列面板，`retry` 是失败后点「重试」时调的函数。
+- `CreatePage.draw(p, 张数)` 返回每张一个 Promise（出好是图库那一项，校验没过返回 null）；`p.label` 是队列里显示的名字，`p.characters` 给了就不用创作页的多角色格子。
+- `Writer.run({ plan: 张数 })`（0 = AI 定 2~6 张）返回 `{ images: [{ desc, tag, nl, negative, size }] }`；`Writer.run({ rewrite: { tag, nl, negative, hint } })` 照原画面重写。
 
 ## 多角色和画风参考图
 
-- 角色列表存在 `characters` 键（像草稿一样跟着创作页走）：`[{ id, on, tag, negative, pos }]`，最多 6 个。出图时写进 `v4_prompt` / `v4_negative_prompt` 的 `char_captions`，另发一份 `characterPrompts`；1girl/1boy 换成 girl/boy；选了站位就开 `use_coords`。V3 忽略。配方记 `meta.characters`，「重绘」「用这套重画」按那张图的角色来。角色库的 `Nai.addHook` 会把角色格子里整项是角色名的换成外貌。
+- 角色列表存在 `charSlots` 键（像草稿一样跟着创作页走；以前存在 `characters`，和角色库撞键，打开时自动搬）：`[{ id, on, tag, negative, pos }]`，最多 6 个。出图时写进 `v4_prompt` / `v4_negative_prompt` 的 `char_captions`，另发一份 `characterPrompts`；1girl/1boy 换成 girl/boy；选了站位就开 `use_coords`。V3 忽略。配方记 `meta.characters`，「重绘」「用这套重画」按那张图的角色来。角色库的 `Nai.addHook` 会把角色格子里整项是角色名的换成外貌。
 - 参考图索引在 `nai.vibes`（`{ id, name, on, strength, info }`），图和编码在 `vibe:<id>`（`{ image, thumb, enc: [{ key, info, data }] }`，进备份）。V4 起出图前（包了一层 `Nai.generate`）缺哪个模型 / 信息提取量的编码就调 `/ai/encode-vibe` 补上（官方每次扣 2 Anlas，同一张排了几张只编一次），放进 `reference_image_multiple_cached`；V3 直接发原图。配方记 `meta.vibes`。
 - `Nai.addHook(fn)` 的 `fn` 有第 4 个参数 `extra`：往里放的东西合进这张图的 `meta`。
 
@@ -114,6 +119,14 @@ PW=/opt/node-tools/node_modules/playwright CHROME=/opt/pw-browsers/chromium-1194
 设置 → 「重型提示词」：导入酒馆聊天补全预设 JSON。每次先发默认那套，AI 回的格式不对，剩下的重试改用预设拼的消息链，下次写提示词又从默认开始（同柏宝绘）。
 按 `prompt_order`（优先 100001）排序和取开关；角色卡、世界书等标记条目不导入，「聊天记录」换成📌「自然语言生图提示词」，就是默认那整串消息；深度条目插进这串消息里；不在顺序里的条目收在「没在顺序里的条目」，不发送。
 条目可开关、按住 ≡ 拖动排序、改名字/身份/位置/深度/顺序/内容、多选删除、新建；能预览实际发出的消息。酒馆宏（`{{user}}`=用户、`{{char}}`=AI、变量、随机等）照搬问答机 `预设.js`。
+
+## AI 进阶 + 批量（照柏宝绘）
+
+- **拆成多张**：创作页描述下面选「拆成 N 张 / AI 定张数」，按钮变「AI 拆成多张」。AI 回 `{"images":[...],"changes":[]}`，按描述里事情的先后拆成不同的瞬间，同一角色外貌、衣服保持一致；张数不对算格式不对，自动重试。changes 只按第一张执行一次。结果卡片每张可「填到上面」「出这张」，或「全部出图」（开了写完自动出图就直接全排进队列），每张按创作页选的「几张」出，带创作页的多角色。
+- **AI 重写**：提示词卡片的「AI 重写」，可附一句要求（记住上次写的）。把当前 tag / nl / 负面当锚点发给 AI，画面不变只重写；附加要求优先级最高（同柏宝绘 slotPlan + rewriteHint）。这次 AI 回的 changes 丢掉。
+- **英文描述开关**：创作页上也有一个，和设置里「生成英文自然语言描述」是同一个；V4 / V3 灰掉。
+- **实时显示**：写、拆、重写时 AI 的输出都边写边显示在描述下面；批量页显示在正在写的那一条里。
+- **批量页**（底部第二个标签）：一行一条描述，「开始」后 AI 挨个写，写完一条马上排进出图队列（关了「写完就出图」就停在「写好了」，之后点「写好的全部出图」）。每条可重新写、再出一次、填到创作页、删除；失败的可「重试失败的」（写失败重写、出图失败重出）。「停止」只停写提示词，已经排进队列的图在出图队列里取消。批量出图不带创作页的多角色格子。
 
 ## 标签库
 

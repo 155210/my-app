@@ -19,12 +19,16 @@
 
         <main id="views">
             <section id="view-create" class="view"></section>
+            <section id="view-batch" class="view" hidden></section>
             <section id="view-gallery" class="view" hidden></section>
         </main>
 
         <nav id="tabbar">
             <button data-tab="create" class="on">
                 <svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></svg><span>创作</span>
+            </button>
+            <button data-tab="batch">
+                <svg viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1.2"/><circle cx="4.5" cy="12" r="1.2"/><circle cx="4.5" cy="18" r="1.2"/></svg><span>批量</span>
             </button>
             <button data-tab="gallery">
                 <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 16l5-5 4 4 3-3 6 6"/><circle cx="15.5" cy="8.5" r="1.5"/></svg><span>图库</span>
@@ -48,6 +52,8 @@
     <script src="风格.js"></script>
     <script src="自定义提示词.js"></script>
     <script src="页面-创作.js"></script>
+    <script src="规划.js"></script>
+    <script src="页面-批量.js"></script>
     <script src="快捷栏.js"></script>
     <script src="多角色.js"></script>
     <script src="参考图.js"></script>
