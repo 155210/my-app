@@ -110,6 +110,8 @@
             quality: '',        // 留空 = 模型默认
             negative: '',       // 留空 = 模型默认
             naturalLanguage: true,
+            transparent: false, // V5 透明背景（出 PNG 带透明通道）
+            furry: false,       // Furry 模式：正面最前面加 fur dataset（V4 起）
             vibes: [],          // 画风参考图：{ id, name, on, strength 强度, info 信息提取量 }；图和编码另存在 vibe:<id>（见 参考图.js）
         },
         // 留空 = 内置（规范见 写词.js，破限词、思维链见 自定义提示词.js）；heavy = 重型提示词（酒馆预设），打开时在 自定义提示词.js 里补全

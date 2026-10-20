@@ -31,7 +31,10 @@
     function fullPrompts(nai, p) {
         const st = activeStyle(nai) || {};
         const tag = tagFilters.reduce((t, fn) => fn(t, nai, p) || t, p.tag || '');
-        let positive = joinTags(st.prefix, tag, st.suffix, Params.qualityOf(nai));
+        // V5 透明背景：官网把 transparent background 放在质量词前面；Furry 模式：最前面加 fur dataset（V3 没有）
+        const clear = nai.transparent && Params.isV5(nai.model) && !/transparent background/i.test(tag) ? 'transparent background' : '';
+        const fur = nai.furry && !Params.isV3(nai.model) && !/^\s*fur dataset\b/i.test(st.prefix || tag) ? 'fur dataset' : '';
+        let positive = joinTags(fur, st.prefix, tag, st.suffix, clear, Params.qualityOf(nai));
         const nl = String(p.nl || '').trim();
         if (nai.naturalLanguage && Params.supportsNl(nai.model) && nl) positive += '. ' + nl;
         const negative = joinTags(Params.negativeOf(nai), st.negative, p.negative);
@@ -97,6 +100,7 @@
                 v4_negative_prompt: { caption: { base_caption: negative, char_captions: [] }, legacy_uc: false },
             });
         }
+        if (nai.transparent && v5) Object.assign(params, { tag_hint_transparent_background: true, straight_alpha: true });
         const extra = {};
         hooks.forEach((h) => h(params, nai, p, extra));
         if (sampler === 'k_euler_ancestral') {
@@ -105,7 +109,7 @@
         }
         return {
             body: { input: positive, model: nai.model, action: 'generate', parameters: params, use_new_shared_trial: true },
-            meta: Object.assign({ positive, negative, width, height, seed, model: nai.model, sampler, steps: params.steps, scale: params.scale, size: orientation, style: (activeStyle(nai) || {}).name || '' }, extra),
+            meta: Object.assign({ positive, negative, width, height, seed, model: nai.model, sampler, steps: params.steps, scale: params.scale, size: orientation, style: (activeStyle(nai) || {}).name || '', transparent: !!(nai.transparent && v5), furry: !!(nai.furry && !Params.isV3(nai.model)) }, extra),
         };
     }
 
