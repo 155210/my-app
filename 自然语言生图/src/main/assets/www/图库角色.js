@@ -4,6 +4,7 @@
  * 从配方里找（不用重新调 AI）：
  *  1. 角色库：中文描述或提示词里写了角色的名字 / 别名，或者正面里有它的「同人身份标签」→ 用角色库里的名字
  *  2. 标签库：正面提示词、多角色的角色提示词里出现的 Danbooru 角色标签（类别 4）、作品标签（类别 3）→ 用中文名，没中文用英文
+ *  3. 标签库里没有的新角色：写成「名字 (作品)」的标签也列出来（括号前能对上已有角色就算那个角色）
  * 结果：[{ key, label, en, kind: 'char' | 'work' }]，key 形如 lib:<角色库 id> / tag:<英文标签>
  */
 (function () {
@@ -11,6 +12,7 @@
 
     let tagMap = null;   // 英文标签 → 标签库条目 [英文, 中文, 热度, 类别]，只留角色和作品（中文读条目本身，改了名立刻生效）
     let tagLoading = null;
+    let otherTags = null; // 标签库里别的类别（衣服、动作…），带括号的普通标签不当成角色
 
     function loadTags() {
         if (tagMap) return Promise.resolve(tagMap);
@@ -18,7 +20,8 @@
         if (!tagLoading) {
             tagLoading = TagLib.load().then((tags) => {
                 tagMap = new Map();
-                for (const t of tags) if (t[3] === 4 || t[3] === 3) tagMap.set(t[0], t);
+                otherTags = new Set();
+                for (const t of tags) if (t[3] === 4 || t[3] === 3) tagMap.set(t[0], t); else otherTags.add(t[0]);
                 return tagMap;
             }).catch(() => { tagLoading = null; return null; });
         }
@@ -58,9 +61,16 @@
         }
         if (tm) {
             for (const t of tags) {
-                const hit = tm.get(t);
-                if (!hit || covered.has(t)) continue;
-                add({ key: 'tag:' + t, label: hit[1] || t, en: t, kind: hit[3] === 4 ? 'char' : 'work' });
+                if (covered.has(t)) continue;
+                const c = window.TagLib && TagLib.loaded && TagLib.canon ? TagLib.canon(t) : ''; // 别名、写法不一样的也认
+                const hit = tm.get(t) || (c && tm.get(c));
+                if (hit) { add({ key: 'tag:' + hit[0], label: hit[1] || hit[0], en: hit[0], kind: hit[3] === 4 ? 'char' : 'work' }); continue; }
+                // 标签库里没有的新角色：AI 常写成「名字 (作品)」。去掉括号能对上就归到那个角色，对不上也单独列出来（用英文名）
+                const m = /^(.+?)\s*\(([^()]+)\)$/.exec(t);
+                if (!m || (otherTags && (otherTags.has(t) || otherTags.has(m[1]) || (c && otherTags.has(c))))) continue; // 弓 (武器) 这类普通标签不算
+                const base = tm.get(m[1]);
+                if (base && base[3] === 4) { if (!covered.has(m[1])) add({ key: 'tag:' + m[1], label: base[1] || m[1], en: m[1], kind: 'char' }); continue; }
+                add({ key: 'tag:' + t, label: t, en: t, kind: 'char' });
             }
         }
         return out;
