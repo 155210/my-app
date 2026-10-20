@@ -59,6 +59,9 @@
     // ------------------------------------------------------------
     let gridUrls = [];
     let sel = null;        // 多选模式：选中的 id 集合；null = 没在多选
+    const filt = { q: '', key: '' }; // 搜索词、选中的角色 / 作品（GalleryChars 的 key）
+    let shownIds = null;   // 筛选后网格里的图（null = 没筛选），大图左右滑只在这些里换
+    let qTimer = 0;
     let observer = null;
 
     async function refresh() {
@@ -67,7 +70,7 @@
         gridUrls.forEach((u) => URL.revokeObjectURL(u));
         gridUrls = [];
         if (observer) observer.disconnect();
-        const items = await Gallery.list();
+        let items = await Gallery.list();
         const p = await Gallery.getPrefs();
         if (!items.length) {
             r.innerHTML = '<div class="empty"><b>还没有图</b>在「创作」里出的图会自动存在这里'
@@ -75,18 +78,33 @@
             $('#g-read', r).onclick = pickAndRead;
             return;
         }
-        const total = items.reduce((a, x) => a + (x.bytes || 0), 0);
+        const all = items;
+        const found = window.GalleryChars ? await GalleryChars.index(all) : new Map();
+        const chipList = window.GalleryChars ? GalleryChars.chips(found) : [];
+        if (filt.key && !chipList.some((c) => c.key === filt.key)) filt.key = '';
+        const filtering = !!(filt.q.trim() || filt.key);
+        items = all.filter((x) => (!filt.key || (found.get(x.id) || []).some((c) => c.key === filt.key))
+            && (!window.GalleryChars || GalleryChars.matches(x, found.get(x.id) || [], filt.q)));
+        shownIds = filtering ? items.map((x) => x.id) : null;
+        const total = all.reduce((a, x) => a + (x.bytes || 0), 0);
         const full = p.size === 'full';
         if (sel) for (const id of [...sel]) if (!items.some((x) => x.id === id)) sel.delete(id);
+        const filterRow = '<div class="g-filter"><input type="search" id="g-q" placeholder="搜角色、描述、标签（中文英文都行）" value="' + esc(filt.q) + '">'
+            + (chipList.length ? '<div class="g-chips" id="g-chips"><button data-key=""' + (filt.key ? '' : ' class="on"') + '>全部</button>'
+                + chipList.map((c) => '<button data-key="' + esc(c.key) + '"' + (c.key === filt.key ? ' class="on"' : '') + ' title="' + esc(c.en || '') + '">'
+                    + (c.kind === 'work' ? '<i>作品</i>' : '') + esc(c.label) + '<span>' + c.n + '</span></button>').join('') + '</div>' : '')
+            + '</div>';
         r.innerHTML = (sel
             ? '<div class="g-bar sel-bar"><button class="icon-btn" id="g-sel-x" aria-label="退出多选">' + UI.ICON.close + '</button>'
                 + '<b class="grow" id="g-sel-n"></b><button class="btn small" id="g-sel-all"></button>'
                 + '<button class="btn small" id="g-sel-save">保存</button><button class="btn small danger" id="g-sel-del">删除</button></div>'
-            : '<div class="g-bar"><span class="card-sub">共 ' + items.length + ' 张' + (total ? ' · ' + mb(total) : '') + '</span>'
+            : '<div class="g-bar"><span class="card-sub">' + (filtering ? '筛出 ' + items.length + ' / ' + all.length + ' 张' : '共 ' + all.length + ' 张' + (total ? ' · ' + mb(total) : '')) + '</span>'
                 + '<div class="seg" id="g-size">' + Gallery.SIZES.map(([k, t]) => '<button data-v="' + k + '"' + (k === p.size ? ' class="on"' : '') + '>' + t + '</button>').join('') + '</div>'
                 + '<button class="icon-btn" id="g-sel" aria-label="多选">' + ICON_SEL + '</button>'
                 + '<button class="icon-btn" id="g-read" aria-label="读取图片信息">' + ICON_READ + '</button>'
                 + '<button class="icon-btn" id="g-opts" aria-label="图库选项">' + ICON_MORE + '</button></div>')
+            + filterRow
+            + (items.length ? '' : '<div class="empty" style="margin-top:8vh"><b>没有符合的图</b>换个词，或者点「全部」</div>')
             + '<div class="grid size-' + p.size + '">' + items.map((x) => {
                 const m = x.meta || {};
                 const ar = full && m.width && m.height ? ' style="aspect-ratio:' + m.width + '/' + m.height + '"' : '';
@@ -97,7 +115,23 @@
         grid.classList.toggle('selecting', !!sel);
         grid.onclick = (e) => {
             const b = e.target.closest('[data-id]'); if (!b) return;
-            if (sel) toggle(b); else openViewer(b.dataset.id);
+            if (sel) toggle(b); else openViewer(b.dataset.id, shownIds);
+        };
+        const q = $('#g-q', r);
+        q.oninput = () => {
+            clearTimeout(qTimer);
+            qTimer = setTimeout(async () => {
+                filt.q = q.value;
+                await refresh();
+                const q2 = $('#g-q', root());
+                if (q2) { q2.focus(); q2.setSelectionRange(q2.value.length, q2.value.length); }
+            }, 250);
+        };
+        const chipBox = $('#g-chips', r);
+        if (chipBox) chipBox.onclick = (e) => {
+            const b = e.target.closest('[data-key]'); if (!b) return;
+            filt.key = b.dataset.key === filt.key ? '' : b.dataset.key;
+            refresh();
         };
         onLongPress(grid, (e) => e.target.closest && e.target.closest('[data-id]'), (b) => { if (sel) toggle(b); else thumbMenu(b.dataset.id); });
         if (sel) bindSelBar(r, items);
@@ -420,8 +454,9 @@
     // ------------------------------------------------------------
     // 大图
     // ------------------------------------------------------------
-    async function openViewer(id) {
-        const items = await Gallery.list();
+    async function openViewer(id, ids) {
+        const master = await Gallery.list();
+        const items = ids ? master.filter((x) => ids.includes(x.id)) : master;
         let idx = items.findIndex((x) => x.id === id);
         if (idx < 0) return;
         let url = '';
@@ -464,13 +499,13 @@
         async function load(i) {
             idx = i;
             const item = cur();
+            $('[data-title]', L.box).textContent = new Date(item.time).toLocaleString();
+            $('[data-count]', L.box).textContent = (idx + 1) + ' / ' + items.length;
             const blob = await Gallery.getBlob(item.id);
             if (url) URL.revokeObjectURL(url);
             url = blob ? URL.createObjectURL(blob) : '';
             img.src = url || item.thumb || '';
             resetZ(false);
-            $('[data-title]', L.box).textContent = new Date(item.time).toLocaleString();
-            $('[data-count]', L.box).textContent = (idx + 1) + ' / ' + items.length;
         }
 
         /** 换到上一张(-1) / 下一张(1)，带滑动动画；到头了弹回去 */
@@ -617,6 +652,7 @@
             else if (a === 'reuse') { close(); CreatePage.reuse(item); }
             else if (a === 'del') {
                 if (!await confirmDelete(item)) return;
+                if (items !== master) { const k = items.indexOf(item); if (k >= 0) items.splice(k, 1); }
                 refresh();
                 if (!items.length) { close(); return; }
                 load(Math.min(idx, items.length - 1));
