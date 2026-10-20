@@ -21,12 +21,30 @@ const fails = []; const ok = (c, m) => { if (!c) fails.push(m); console.log((c ?
   page.on('pageerror', (e) => fails.push('页面报错 ' + e.message));
   page.on('console', (m) => { if (m.type() === 'error') console.log('console:', m.text()); });
 
+  // 假 AI：记下发去的用户消息
+  const asked = [];
+  await page.route('https://ai.test/**', async (r) => {
+    const req = r.request();
+    if (req.method() === 'OPTIONS') return r.fulfill({ status: 204, headers: CORS });
+    const user = JSON.parse(req.postData()).messages.filter((m) => m.role === 'user').map((m) => m.content).join('\n');
+    asked.push(user);
+    const reply = JSON.stringify(/局部重绘/.test(user) ? { tag: '1girl, smile, red dress', nl: '', negative: 'blue dress', size: 'portrait' }
+      : /这次是重写提示词/.test(user) ? { tag: '1girl, rewritten', nl: '', negative: '', size: 'portrait' }
+        : { tag: '1girl, umbrella, rain', nl: '', negative: 'sun', size: 'portrait' });
+    const sse = 'data: ' + JSON.stringify({ choices: [{ delta: { content: reply } }] }) + '\n\ndata: [DONE]\n\n';
+    return r.fulfill({ headers: { ...CORS, 'content-type': 'text/event-stream' }, body: sse });
+  });
+  const lastAsk = () => asked[asked.length - 1] || '';
+
   await page.goto('http://localhost:' + srv.address().port + '/' + encodeURIComponent('首页.html'));
   await page.waitForSelector('#c-i2i');
   // 假 NAI 回的图：512×768 的 PNG（放大回 4 倍大小）
   const mkPng = (w, h) => page.evaluate(([w, h]) => { const c = document.createElement('canvas'); c.width = w; c.height = h; const g = c.getContext('2d'); g.fillStyle = '#c33'; g.fillRect(0, 0, w, h); g.fillStyle = '#33c'; g.fillRect(0, 0, w / 2, h); return c.toDataURL('image/png').split(',')[1]; }, [w, h]);
   const PNG = Buffer.from(await mkPng(512, 768), 'base64');
   const BIG = Buffer.from(await mkPng(2048, 3072), 'base64');
+  const MID = Buffer.from(await mkPng(768, 1152), 'base64');
+  const GREEN = Buffer.from(await page.evaluate(() => { const c = document.createElement('canvas'); c.width = 512; c.height = 768; const g = c.getContext('2d'); g.fillStyle = '#0f0'; g.fillRect(0, 0, 512, 768); return c.toDataURL('image/png').split(',')[1]; }), 'base64');
+  let greenFor = ''; // 这种 action 回全绿的图（看贴回原图对不对）
   const reqs = [];
   await page.route('https://nai.test/**', async (r) => {
     const req = r.request();
@@ -34,7 +52,7 @@ const fails = []; const ok = (c, m) => { if (!c) fails.push(m); console.log((c ?
     if (req.url().endsWith('/user/subscription')) return r.fulfill({ status: 404, headers: CORS });
     const b = JSON.parse(req.postData());
     reqs.push({ url: req.url(), b });
-    return r.fulfill({ headers: { ...CORS, 'content-type': 'image/png' }, body: req.url().endsWith('/upscale') ? BIG : PNG });
+    return r.fulfill({ headers: { ...CORS, 'content-type': 'image/png' }, body: req.url().endsWith('/upscale') ? BIG : greenFor && b.action === greenFor ? GREEN : b.parameters && b.parameters.width === 768 ? MID : PNG });
   });
   const shot = (n) => process.env.SHOT ? page.screenshot({ path: path.join(process.env.SHOT, n + '.png') }) : null;
   const lastReq = () => reqs[reqs.length - 1];
@@ -289,6 +307,123 @@ const fails = []; const ok = (c, m) => { if (!c) fails.push(m); console.log((c ?
   await page.reload();
   await page.waitForSelector('#c-i2i .vibe-thumb');
   ok(!(await page.isChecked('#c-i2i [data-f="on"]')), '重开后底图和开关还在');
+
+  // ================= 编辑页让 AI 写提示词、画风模板、局部重绘贴回原图 =================
+  await page.evaluate(() => { Object.assign(UI.settings.ai, { url: 'https://ai.test/v1', model: 'm', key: 'x' }); UI.settings.autoDraw = false; Object.assign(UI.settings.nai, { portraitSize: '512x768', model: 'nai-diffusion-4-5-full' }); });
+  ok(await page.evaluate(() => UI.settings.nai.styles.some((x) => x.blank && x.name.startsWith('空白'))), '内置了「空白（不加任何词）」画风模板');
+  await page.evaluate((id) => GalleryPage.openViewer(id), first.id);
+  await page.waitForSelector('[data-quick] [data-q="edit"]');
+  await page.click('[data-quick] [data-q="edit"]');
+  await page.waitForSelector('[data-f="desc"]');
+  ok(await page.isVisible('[data-ai="write"]') && await page.isVisible('[data-ai="rewrite"]') && await page.isVisible('[data-style]'), '编辑页有中文描述、AI 写提示词、AI 重写、画风模板');
+  await page.fill('[data-f="desc"]', '同一个女孩在雨里撑伞');
+  await page.click('[data-ai="write"]');
+  await page.waitForFunction(() => document.querySelector('[data-f="tag"]').value === '1girl, umbrella, rain');
+  ok(lastAsk().includes('同一个女孩在雨里撑伞'), 'AI 写提示词：发的是编辑页的中文描述');
+  ok(await page.inputValue('[data-f="negative"]') === 'sun', 'AI 写的负面词也填上了');
+  // AI 重写（附要求）
+  await page.click('[data-ai="rewrite"]');
+  await page.fill('.dialog [data-hint]', '表情再害羞一点');
+  await page.click('.dialog [data-go]');
+  await page.waitForFunction(() => document.querySelector('[data-f="tag"]').value === '1girl, rewritten');
+  ok(/这次是重写提示词/.test(lastAsk()) && lastAsk().includes('1girl, umbrella, rain') && lastAsk().includes('表情再害羞一点'), 'AI 重写：拿现在的提示词当锚点，带上要求');
+  // 空白画风模板：不加质量词、负面词
+  const blankId = await page.evaluate(() => UI.settings.nai.styles.find((x) => x.blank).id);
+  await page.selectOption('[data-style]', blankId);
+  let n0 = reqs.length;
+  await page.click('[data-go]');
+  await waitReq(n0 + 1);
+  b = lastReq().b;
+  ok(b.input === '1girl, rewritten' && b.parameters.negative_prompt === '', '选空白模板：正面只有标签、负面是空的（不加默认质量词和负面词）');
+  ok(await page.evaluate(() => UI.settings.nai.styleId) !== blankId, '编辑页选模板不改创作页的');
+  await page.waitForSelector('[data-cmp]', { timeout: 8000 });
+  await page.click('.layer:last-child [data-close]');
+
+  // 局部重绘：AI 只改涂的那块
+  await page.click('[data-modes] [data-m="infill"]');
+  await page.fill('[data-f="fill"]', '换成红色的连衣裙');
+  await page.click('[data-ai="write"]');
+  await page.waitForFunction(() => document.querySelector('[data-f="tag"]').value === '1girl, smile, red dress');
+  ok(lastAsk().includes('换成红色的连衣裙') && /只有被涂掉的那一块/.test(lastAsk()) && lastAsk().includes('1girl, rewritten'), '局部重绘的 AI：说明只改涂的那块，拿原来的提示词当锚点');
+  // 贴回原图：NAI 回全绿，涂过的地方绿、没涂的地方还是原图
+  greenFor = 'infill';
+  await page.$eval('[data-mask]', (el) => el.scrollIntoView({ block: 'nearest' }));
+  let mb = await (await page.$('[data-mask]')).boundingBox();
+  await page.mouse.move(mb.x + mb.width * 0.6, mb.y + mb.height * 0.4); await page.mouse.down();
+  await page.mouse.move(mb.x + mb.width * 0.8, mb.y + mb.height * 0.5, { steps: 5 }); await page.mouse.up();
+  await shot('8-重绘AI');
+  n0 = reqs.length;
+  await page.click('[data-go]');
+  await waitReq(n0 + 1);
+  await page.waitForSelector('[data-cmp]', { timeout: 8000 });
+  const px = (id, fx, fy) => page.evaluate(async ([id, fx, fy]) => {
+    const blob = await Gallery.getBlob(id); const img = new Image(); img.src = URL.createObjectURL(blob); await img.decode();
+    const c = document.createElement('canvas'); c.width = img.width; c.height = img.height; const g = c.getContext('2d'); g.drawImage(img, 0, 0);
+    return Array.from(g.getImageData(Math.round(img.width * fx), Math.round(img.height * fy), 1, 1).data.slice(0, 3)).concat([img.width]);
+  }, [id, fx, fy]);
+  let res = await page.evaluate(async () => (await Gallery.list())[0]);
+  const inside = await px(res.id, 0.7, 0.45), outside = await px(res.id, 0.1, 0.1), outR = await px(res.id, 0.9, 0.9);
+  ok(inside[1] > 200 && inside[0] < 50, '涂过的地方是 NAI 画的：' + inside);
+  ok(outside[2] > 150 && outside[1] < 80 && outR[0] > 150 && outR[1] < 80, '没涂的地方和原图一样：' + outside + ' / ' + outR);
+  ok(res.meta.edit.feather === 16, '配方记下边缘过渡');
+  await page.click('.layer:last-child [data-close]');
+
+  // 原图糊：先整张变清晰再重绘（精修 → 在 768×1152 上重绘）
+  await page.click('[data-opt="pre"] + span');
+  ok(/几步加起来 约 \d+|几步加起来 \d+/.test(await page.textContent('[data-size]')), '勾了先变清晰，显示几步加起来的花费：' + await page.textContent('[data-size]'));
+  ok(/多/.test(await page.textContent('[data-cost-pre]')) && /真人照片/.test(await page.textContent('[data-ctl]')), '先变清晰标了花费，提醒真人照片会变');
+  n0 = reqs.length;
+  await page.click('[data-go]');
+  await waitReq(n0 + 2);
+  const r1 = reqs[n0].b, r2 = reqs[n0 + 1].b;
+  ok(r1.action === 'img2img' && r1.parameters.width === 768 && r1.parameters.strength === 0.35, '先精修整张：768×1152，强度 0.35');
+  ok(r2.action === 'infill' && r2.parameters.width === 768 && r2.parameters.height === 1152 && typeof r2.parameters.mask === 'string', '再在变清晰的图上局部重绘（遮罩跟着放大）');
+  await page.waitForSelector('[data-cmp]', { timeout: 8000 });
+  await page.click('.layer:last-child [data-close]');
+  await page.click('[data-opt="pre"] + span');
+
+  // 画完只融合周围
+  await page.click('[data-opt="post"] + span');
+  ok(await page.isChecked('[data-opt="postLocal"]'), '「只融合重画那块周围」默认开着');
+  greenFor = 'infill';
+  n0 = reqs.length;
+  await page.click('[data-go]');
+  await waitReq(n0 + 2);
+  ok(reqs[n0].b.action === 'infill' && reqs[n0 + 1].b.action === 'img2img', '重绘完接着精修一遍');
+  await page.waitForSelector('[data-cmp]', { timeout: 8000 });
+  res = await page.evaluate(async () => (await Gallery.list())[0]);
+  const far = await px(res.id, 0.1, 0.9);
+  ok(res.meta.edit.local === true && far[2] > 150 && far[1] < 80 && far[3] === 512, '融合只贴回涂的周围，远处（脸）一个像素不动、尺寸不变：' + far);
+  await page.click('.layer:last-child [data-close]');
+  await page.click('.layer:last-child [data-close]');
+  await page.click('.layer:last-child [data-close]');
+  greenFor = '';
+
+  // 创作页底图卡片：涂遮罩 → 出图就是局部重绘
+  await page.click('#c-i2i [data-f="on"] + span');
+  await page.click('#c-i2i [data-a="mask"]');
+  await page.waitForSelector('.layer [data-ok]');
+  await page.click('.layer [data-ok]');
+  await page.waitForTimeout(200);
+  ok(await page.isVisible('.layer [data-ok]'), '没涂不让用');
+  await page.$eval('.layer [data-mask]', (el) => el.scrollIntoView({ block: 'nearest' }));
+  mb = await (await page.$('.layer [data-mask]')).boundingBox();
+  await page.mouse.move(mb.x + mb.width * 0.4, mb.y + mb.height * 0.8); await page.mouse.down(); // 避开中间的提示条
+  await page.mouse.move(mb.x + mb.width * 0.6, mb.y + mb.height * 0.9, { steps: 5 }); await page.mouse.up();
+  await page.click('.layer [data-ok]');
+  await page.waitForSelector('#c-i2i [data-a="unmask"]');
+  ok((await page.textContent('#c-i2i')).includes('局部重绘') && await page.isVisible('#c-i2i [data-f="fillStrength"]'), '底图卡片变成局部重绘，有重画强度');
+  n0 = reqs.length;
+  await page.click('#c-draw');
+  await waitReq(n0 + 1);
+  b = lastReq().b;
+  ok(b.action === 'infill' && b.parameters.strength === 1 && typeof b.parameters.mask === 'string', '创作页出图走局部重绘');
+  await page.waitForTimeout(800);
+  await page.click('#c-i2i [data-a="unmask"]');
+  n0 = reqs.length;
+  await page.click('#c-draw');
+  await waitReq(n0 + 1);
+  ok(lastReq().b.action === 'img2img', '「不重绘了」又变回普通图生图');
 
   await page.waitForTimeout(500);
   await browser.close();

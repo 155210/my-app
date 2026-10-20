@@ -34,10 +34,11 @@
                 + '<div class="row" style="margin-bottom:8px"><input class="grow" type="text" data-k="' + k + 'name" placeholder="模板名字">'
                 + (on ? '<span class="badge acc">正在用</span>' : '<button class="btn" data-act="style-use" data-i="' + i + '">用这套</button>') + '</div>'
                 + '<div class="field"><label>前缀（画师串，拼在正面最前）</label><textarea class="ta small" data-k="' + k + 'prefix" placeholder="artist:xxx, 0.8::artist:yyy::"></textarea></div>'
-                + '<div class="field"><label>正面质量词（这套专用，拼在正面最后）' + setBadge(x.quality) + '</label><textarea class="ta small" data-k="' + k + 'quality" placeholder="' + esc(Params.globalQuality(n)) + '"></textarea>'
+                + (x.blank ? '<div class="help" style="margin-bottom:12px">空白模板：质量词、负面提示词都不加（不用「NAI 出图」页的，也不用模型默认的），只发你自己写的标签。</div>'
+                    : '<div class="field"><label>正面质量词（这套专用，拼在正面最后）' + setBadge(x.quality) + '</label><textarea class="ta small" data-k="' + k + 'quality" placeholder="' + esc(Params.globalQuality(n)) + '"></textarea>'
                 + '<div class="help">留空 = 用「NAI 出图」页的质量词（灰字就是现在会用的）</div></div>'
                 + '<div class="field"><label>负面提示词（这套专用）' + setBadge(x.uc) + '</label><textarea class="ta small" data-k="' + k + 'uc" placeholder="' + esc(Params.globalNegative(n)) + '"></textarea>'
-                + '<div class="help">留空 = 用「NAI 出图」页的负面词（灰字就是现在会用的）</div></div>'
+                + '<div class="help">留空 = 用「NAI 出图」页的负面词（灰字就是现在会用的）</div></div>')
                 + '<div class="field"><label>后缀（拼在画面标签后、质量词前）</label><textarea class="ta small" data-k="' + k + 'suffix" placeholder="可留空，比如 flat color, cel shading"></textarea></div>'
                 + '<div class="field"><label>额外负面词（接在负面提示词后面）</label><textarea class="ta small" data-k="' + k + 'negative" placeholder="可留空"></textarea></div>'
                 + '<div class="btns"><button class="btn" data-act="style-copy" data-i="' + i + '">复制一套</button>'
@@ -48,7 +49,8 @@
             + n.styles.map((x) => '<option value="' + esc(x.id) + '">' + esc(x.name || '未命名') + '</option>').join('') + '</select></div>'
             + list
             + '<div class="btns"><button class="btn primary" data-act="style-add">新建一套</button>'
-            + (n.styles.some((x) => x.id === 'st_default') ? '' : '<button class="btn" data-act="style-builtin">加回内置那套</button>') + '</div>';
+            + (n.styles.some((x) => x.id === 'st_default') ? '' : '<button class="btn" data-act="style-builtin">加回内置那套</button>')
+            + (n.styles.some((x) => x.blank) ? '' : '<button class="btn" data-act="style-blank">加一套空白模板</button>') + '</div>';
     }
 
     const setBadge = (v) => (String(v || '').trim() ? ' <span class="badge acc">已设置</span>' : ' <span class="badge">未设置</span>');
@@ -62,6 +64,7 @@
             'style-use': (btn, redraw) => { use(nai().styles[idx(btn)].id); redraw(); },
             'style-add': (btn, redraw) => { const st = add(); st.name = '模板 ' + nai().styles.length; use(st.id); redraw(); },
             'style-copy': (btn, redraw) => { add(nai().styles[idx(btn)]); redraw(); },
+            'style-blank': (btn, redraw) => { nai().styles.push(Object.assign({}, Params.BLANK_STYLE)); UI.saveSettings(); redraw(); },
             'style-builtin': (btn, redraw) => { nai().styles.push(Object.assign({}, Params.DEFAULT_STYLES[0])); UI.saveSettings(); redraw(); },
             'style-del': async (btn, redraw) => {
                 const st = nai().styles[idx(btn)];

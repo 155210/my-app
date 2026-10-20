@@ -77,6 +77,9 @@
     ];
 
     /** 内置画风模板（来自柏宝绘的默认画师串）；可改可删，删光了就是「不用模板」 */
+    // 空白模板：什么都不加，连质量词、负面提示词也不加（不回落到「NAI 出图」页和模型默认）
+    const BLANK_STYLE = { id: 'st_blank', name: '空白（不加任何词）', prefix: '', quality: '', uc: '', suffix: '', negative: '', blank: true };
+
     const DEFAULT_STYLES = [
         {
             id: 'st_default',
@@ -85,6 +88,7 @@
             suffix: '',
             negative: '',
         },
+        BLANK_STYLE,
     ];
 
     const NAI_OFFICIAL = 'https://image.novelai.net';
@@ -133,6 +137,11 @@
             nai.styles = [{ id, name: '我的画师串', prefix: nai.artist.trim(), suffix: '', negative: '' }].concat(nai.styles);
             nai.styleId = id;
         }
+        // 内置的空白模板只补一次（用户删掉了就不再补）
+        if (!nai.blankAdded) {
+            if (!nai.styles.some((x) => x.id === BLANK_STYLE.id)) nai.styles.push(Object.assign({}, BLANK_STYLE));
+            nai.blankAdded = true;
+        }
         nai.artist = '';
         nai.dirRefs = (Array.isArray(nai.dirRefs) ? nai.dirRefs : []).filter((x) => x && x.id).map((x) => Object.assign({ name: '', on: true, type: 'character', strength: 1, fidelity: 1 }, x));
         nai.vibes = (Array.isArray(nai.vibes) ? nai.vibes : []).filter((x) => x && x.id).map((x) => Object.assign({ name: '', on: true, strength: 0.6, info: 1 }, x));
@@ -160,8 +169,8 @@
     const styleOf = (nai) => (nai.styleId && (nai.styles || []).find((x) => x.id === nai.styleId)) || {};
     const globalQuality = (nai) => (nai.quality || '').trim() || QUALITY[nai.model] || '';
     const globalNegative = (nai) => (nai.negative || '').trim() || NEGATIVE[nai.model] || '';
-    const qualityOf = (nai) => String(styleOf(nai).quality || '').trim() || globalQuality(nai);
-    const negativeOf = (nai) => String(styleOf(nai).uc || '').trim() || globalNegative(nai);
+    const qualityOf = (nai) => (styleOf(nai).blank ? '' : String(styleOf(nai).quality || '').trim() || globalQuality(nai));
+    const negativeOf = (nai) => (styleOf(nai).blank ? '' : String(styleOf(nai).uc || '').trim() || globalNegative(nai));
 
     /** 解析「832×1216 / 832x1216 / 832*1216」；宽高须为 64 的倍数、256–2048 */
     function parseSize(text) {
@@ -179,7 +188,7 @@
     }
 
     window.Params = {
-        MODELS, QUALITY, NEGATIVE, SAMPLERS, NOISE, SIZES, DEFAULT_STYLES, NAI_OFFICIAL, DEFAULTS,
+        MODELS, QUALITY, NEGATIVE, SAMPLERS, NOISE, SIZES, DEFAULT_STYLES, BLANK_STYLE, NAI_OFFICIAL, DEFAULTS,
         normalize, isV5, isV45, isV3, samplersFor, supportsNl, qualityOf, negativeOf, globalQuality, globalNegative, parseSize, modelLabel,
     };
 })();
