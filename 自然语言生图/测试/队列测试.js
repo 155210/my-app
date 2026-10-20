@@ -43,6 +43,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await page.route('https://nai.test/**', async (r) => {
     const req = r.request();
     if (req.method() === 'OPTIONS') return r.fulfill({ status: 204, headers: CORS });
+    // 出图后自动查 Anlas 的 GET，不算出图
+    if (req.url().endsWith('/user/subscription')) return r.fulfill({ headers: { ...CORS, 'content-type': 'application/json' }, body: '{"tier":3,"active":true,"trainingStepsLeft":100}' });
     calls++;
     seeds.push(JSON.parse(req.postData()).parameters.seed);
     if (fail429 > 0) { fail429--; return r.fulfill({ status: 429, headers: { ...CORS, 'content-type': 'application/json' }, body: '{"message":"Concurrent generation is locked"}' }); }
