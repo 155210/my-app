@@ -251,6 +251,25 @@ pre.recipe { margin: 0 0 12px; padding: 8px 10px; border-radius: 10px; backgroun
 .up-bar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; margin: 8px 0 4px; }
 .up-bar > div { height: 100%; width: 0; background: var(--accent); transition: width .3s; }
 
+/* 新手提示 + 功能说明（说明.js） */
+.badge.anlas { color: #f0c46a; border-color: rgba(240, 196, 106, .55); background: rgba(240, 196, 106, .1); }
+.guide-on { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 10px; }
+.guide-bubble {
+    position: fixed; z-index: 90; background: #2c3039; border: 1px solid var(--accent); border-radius: 12px; padding: 10px 12px 6px;
+    font-size: 14px; line-height: 1.5; box-shadow: 0 8px 24px rgba(0, 0, 0, .45); animation: fade .15s;
+}
+.guide-arrow { position: absolute; top: -8px; width: 14px; height: 14px; background: #2c3039; border-left: 1px solid var(--accent); border-top: 1px solid var(--accent); transform: rotate(45deg); }
+.guide-bubble.above .guide-arrow { top: auto; bottom: -8px; transform: rotate(225deg); }
+.guide-text { position: relative; }
+.guide-btns { display: flex; justify-content: flex-end; gap: 2px; margin-top: 4px; }
+.guide-btns button { border: 0; background: none; color: var(--dim); font-size: 13px; padding: 4px 8px; border-radius: 8px; }
+.guide-btns button.on { color: var(--accent); font-weight: 600; }
+.help-group { margin: 18px 0 6px; font-size: 15px; color: var(--accent); }
+.help-item { border: 1px solid var(--line); background: var(--bg2); border-radius: 12px; padding: 10px 12px; margin: 0 0 8px; }
+.help-item.flash { border-color: var(--accent); }
+.help-text { color: var(--dim); font-size: 14px; margin-top: 2px; }
+.help-anlas { margin-top: 4px; color: #d9b469; font-size: 13px; }
+.help-link { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--line); color: var(--dim); font-size: 12px; text-decoration: none; margin-left: 4px; vertical-align: middle; }
 /* 图库：收藏、相册、排序、文件名规则 */
 .g-views { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; }
 .g-views .g-chips { flex: 1; min-width: 0; padding: 0; }

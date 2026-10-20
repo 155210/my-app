@@ -24,6 +24,7 @@ PR 上也会打包，但只放在 Actions 的附件里，不发 Release。
 ├── 测试/角色系统测试.js        衣柜（穿脱、遮挡）、AI 一句话生成角色、写真模式
 ├── 测试/角色库测试.js          角色库：建档、名字换外貌、AI 自动建档/永久变化、全局角色、撤销
 ├── 测试/自定义提示词测试.js    破限词/规范/思维链、重型提示词（酒馆预设）的测试
+├── 测试/说明测试.js          新手提示、说明页、Help.add / data-guide、重新显示 / 不再提示
 ├── 测试/计价测试.js          Anlas 预估（对实测数）、出图按钮上的数字、透明背景、Furry
 ├── 测试/批量测试.js          拆成多张、AI 重写（附要求）、创作页英文描述开关、批量页
 ├── 测试/提示词工具测试.js      联想、调权重、高亮、标签说明、通配符、预设
@@ -50,6 +51,8 @@ PR 上也会打包，但只放在 Actions 的附件里，不发 Release。
         ├── 队列.js               【队列】并发数可调、429 限流自动等待重试、单张/全部取消、失败重试、队列面板、设置页「出图队列」
         ├── 图库.js               【图库数据】存图（可选转 JPG，默认关以保留 NAI 信息）、缩略图、配方、存相册、读图片里的 NAI 信息、图库偏好 galleryPrefs（含排序 sort、文件名规则 nameRule / 计数 nameCounter）、收藏 fav、相册 galleryAlbums（图上只记相册 id，不动文件）
         ├── 工具.js               共用界面小工具（浮层、对话框、列表选择、设置读写）
+        ├── 说明.js               【说明】新手提示（按钮第一次出现时弹一句，看过存 guide 键）+ 顶栏「?」功能说明页
+        ├── 说明-内容.js          现有功能的说明条目（新功能的说明写在自己文件里调 Help.add）
         ├── 页面-设置.js          设置页（AI 接口 / NAI 出图）
         ├── 自定义提示词.js       【照搬柏宝绘】设置页「自定义提示词」（破限词、生图规范、思维链，可改可关）和「重型提示词」（导入酒馆预设，格式不对时重试用）
         ├── 风格.js               画风模板（前缀/后缀/负面，多套）：设置页的「画风模板」标签页
@@ -92,6 +95,7 @@ PR 上也会打包，但只放在 Actions 的附件里，不发 Release。
 - `Writer.addFilter(fn)`：`fn(结果, 设置)` 返回改过的结果（`{tag, nl, negative, size}`），AI 回复解析成功后依次执行。标签库纠错用它。
 - `TagLib`：`load()` 读数据，`fix(标签串)` 纠正写法，`canon(一个标签)`，`candidates(中文)` 找候选，`open()` 打开标签库页面。
 - `SettingsPage.addTab({ id, label, html, acts, after })`：给设置页加一个标签页（`after` 放在哪个标签后面，id 已有就替换），表单项写 `data-k="路径"` 自动绑定保存。
+- **说明和新手提示**（每个新功能都要加）：`Help.add({ id, group, title, text, tip, target, anlas })`。`group` 是说明页分组（开始之前 / 创作页 / 批量页 / 图库 / 出图队列 / 设置 / 其他，写新名字就新建一组）；`text` 进说明页；`tip` + `target`（CSS 选择器）= 那个元素第一次出现在屏幕上时弹一句；会花 Anlas 的 `anlas: true` 或写一句怎么扣。只要提示不进说明页：元素上写 `data-guide="一句话"`（可加 `data-guide-id`、`data-guide-anlas`）。`Help.link(id)` 返回一个小「?」链接，`Help.open(id)` 打开说明页跳到那条。无头测试里默认不弹提示（`navigator.webdriver`），要测就先设 `window.GUIDE_FORCE = true`。
 - 新设置字段加在 `参数.js` 的 `DEFAULTS` 里，老用户打开时自动补上。
 - 队列的设置（`nai.concurrency`、`nai.retry429`、`nai.maxRetries`）没进 `DEFAULTS`，默认值在 `队列.js` 的 `CFG_DEFAULTS`。
 - `Queue.add(fn, { label, retry })`：排一张进队列；`label` 显示在队列面板，`retry` 是失败后点「重试」时调的函数。
