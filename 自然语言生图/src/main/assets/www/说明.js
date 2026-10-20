@@ -29,7 +29,7 @@
         const i = list.findIndex((x) => x.id === e.id);
         if (i >= 0) list[i] = e; else list.push(e);
     }
-    const anlasNote = (a) => (typeof a === 'string' ? a : 'Opus 会员出标准或小尺寸、28 步以内、一次一张不扣点；其他情况每张都扣 Anlas');
+    const anlasNote = (a) => (typeof a === 'string' ? a : 'Opus 会员出标准或小尺寸、28 步以内、一次一张不扣点；其他情况每张都扣 Anlas。按钮上的小标记是这次的预估');
     const ANLAS_BADGE = '<span class="badge anlas">花 Anlas</span>';
     const fmt = (t) => esc(t).replace(/\n/g, '<br>');
 
