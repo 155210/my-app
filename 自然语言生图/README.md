@@ -54,6 +54,7 @@ PR 上也会打包，但只放在 Actions 的附件里，不发 Release。
         ├── 自定义提示词.js       【照搬柏宝绘】设置页「自定义提示词」（破限词、生图规范、思维链，可改可关）和「重型提示词」（导入酒馆预设，格式不对时重试用）
         ├── 风格.js               画风模板（前缀/后缀/负面，多套）：设置页的「画风模板」标签页
         ├── 多角色.js             【多角色】创作页「多角色」卡片：每个角色单独正面/负面、站位，进 char_captions（V4 起）
+        ├── 角色参考.js           【角色参考】Director Reference（精准参考）：角色 / 画风 / 角色+画风，强度、保真度；只有 V4.5；开着时 Vibe 暂停；每张 +5 Anlas
         ├── 参考图.js             【画风参考】创作页「画风参考图」卡片：Vibe 强度、信息提取量，自动编码，导入导出 .naiv4vibe
         ├── 快捷栏.js             创作页的模型/画风/尺寸/锁种子快捷栏（包一层 CreatePage，不改创作页文件）+ 顶栏 Anlas 余额
         ├── 页面-创作.js          创作页（AI 写 / 拆多张 / 重写都走 runAi，输出实时显示；英文描述开关）
@@ -97,6 +98,10 @@ PR 上也会打包，但只放在 Actions 的附件里，不发 Release。
 
 - 角色列表存在 `charSlots` 键（像草稿一样跟着创作页走；以前存在 `characters`，和角色库撞键，打开时自动搬）：`[{ id, on, tag, negative, pos }]`，最多 6 个。出图时写进 `v4_prompt` / `v4_negative_prompt` 的 `char_captions`，另发一份 `characterPrompts`；1girl/1boy 换成 girl/boy；选了站位就开 `use_coords`。V3 忽略。配方记 `meta.characters`，「重绘」「用这套重画」按那张图的角色来。角色库的 `Nai.addHook` 会把角色格子里整项是角色名的换成外貌。
 - 参考图索引在 `nai.vibes`（`{ id, name, on, strength, info }`），图和编码在 `vibe:<id>`（`{ image, thumb, enc: [{ key, info, data }] }`，进备份）。V4 起出图前（包了一层 `Nai.generate`）缺哪个模型 / 信息提取量的编码就调 `/ai/encode-vibe` 补上（官方每次扣 2 Anlas，同一张排了几张只编一次），放进 `reference_image_multiple_cached`；V3 直接发原图。配方记 `meta.vibes`。
+- 摆位置：创作页「自己摆位置」打开后拖圆点，`pos = 'x,y'`（0–1）。V5 原样发（三位小数），V4/4.5 吸到 5×5 网格（0.1…0.9）。
+- 互动存在 `charActs` 键 `[{ id, a, b, act, mutual }]`，出图时摊成 `source#动作` / `target#动作` / `mutual#动作` 放在角色提示词最前；快照 `meta.characters[].acts` 自带这些标签，`Characters.set` 会拆回互动表。
+- 角色参考（`角色参考.js`）：索引 `nai.dirRefs`，图在 `dref:<id>`（已补黑边到 1024×1536 / 1536×1024 / 1472×1472 的 PNG）。发 `director_reference_images / _descriptions / _strength_values / _secondary_strength_values (= 1 - 保真度) / _information_extracted`；只在 V4.5 发；开着时 `参考图.js` 的 Vibe 不发也不编码（官网同样二选一）。配方记 `meta.dirRefs`。
+- 花费：`参考图.js`、`角色参考.js` 各自 `Cost.addExtra` 注册（参考图首次编码 2、超过 4 张每张 +2；角色参考每张 +5），改了调 `Cost.refresh()`。`RefPick.pick()` 选图：手机或 App 图库。
 - `Nai.addHook(fn)` 的 `fn` 有第 4 个参数 `extra`：往里放的东西合进这张图的 `meta`。
 
 ## 图片里的出图信息
