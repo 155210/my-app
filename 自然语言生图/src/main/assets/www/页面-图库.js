@@ -92,7 +92,8 @@
         const filterRow = '<div class="g-filter"><input type="search" id="g-q" placeholder="搜角色、描述、标签（中文英文都行）" value="' + esc(filt.q) + '">'
             + (chipList.length ? '<div class="g-chips" id="g-chips"><button data-key=""' + (filt.key ? '' : ' class="on"') + '>全部</button>'
                 + chipList.map((c) => '<button data-key="' + esc(c.key) + '"' + (c.key === filt.key ? ' class="on"' : '') + ' title="' + esc(c.en || '') + '">'
-                    + (c.kind === 'work' ? '<i>作品</i>' : '') + esc(c.label) + '<span>' + c.n + '</span></button>').join('') + '</div>' : '')
+                    + (c.kind === 'work' ? '<i>作品</i>' : '') + esc(c.label) + '<span>' + c.n + '</span></button>').join('') + '</div>'
+                + '<div class="g-hint">长按名字可以改中文名</div>' : '')
             + '</div>';
         r.innerHTML = (sel
             ? '<div class="g-bar sel-bar"><button class="icon-btn" id="g-sel-x" aria-label="退出多选">' + UI.ICON.close + '</button>'
@@ -128,11 +129,23 @@
             }, 250);
         };
         const chipBox = $('#g-chips', r);
-        if (chipBox) chipBox.onclick = (e) => {
-            const b = e.target.closest('[data-key]'); if (!b) return;
-            filt.key = b.dataset.key === filt.key ? '' : b.dataset.key;
-            refresh();
-        };
+        if (chipBox) {
+            chipBox.onclick = (e) => {
+                const b = e.target.closest('[data-key]'); if (!b) return;
+                filt.key = b.dataset.key === filt.key ? '' : b.dataset.key;
+                refresh();
+            };
+            // 长按名字改名：标签库里的标签改中文名；角色库的角色打开角色编辑
+            onLongPress(chipBox, (e) => e.target.closest && e.target.closest('[data-key]:not([data-key=""])'), async (b) => {
+                const key = b.dataset.key;
+                if (key.startsWith('tag:') && window.TagLib) {
+                    if (await TagLib.editZh(key.slice(4)) !== null) refresh();
+                } else if (key.startsWith('lib:') && window.CharLib) {
+                    const c = CharLib.list.find((x) => 'lib:' + x.id === key);
+                    if (c) CharLib.edit(c, () => refresh());
+                }
+            });
+        }
         onLongPress(grid, (e) => e.target.closest && e.target.closest('[data-id]'), (b) => { if (sel) toggle(b); else thumbMenu(b.dataset.id); });
         if (sel) bindSelBar(r, items);
         else {

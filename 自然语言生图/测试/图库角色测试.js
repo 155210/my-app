@@ -88,6 +88,49 @@ const fails = []; const ok = (c, m) => { if (!c) fails.push(m); console.log((c ?
   await page.click('#g-sel-all');
   ok(await page.textContent('#g-sel-n') === '已选 2 张', '筛选后多选「全选」只选筛出的 2 张');
 
+  // 改中文名：长按筛选条上的名字
+  await page.evaluate(() => window.__appBack()); // 退出多选
+  await page.click('#g-chips button:nth-child(2)'); // 取消筛选
+  await page.waitForFunction(() => document.querySelectorAll('.thumb').length === 4);
+  const chip = await page.$('#g-chips button:nth-child(2)'); const cb = await chip.boundingBox();
+  await page.mouse.move(cb.x + 10, cb.y + 5); await page.mouse.down(); await page.waitForTimeout(650); await page.mouse.up();
+  await page.waitForSelector('.dialog [data-zh]');
+  ok((await page.textContent('.dialog p')).includes('hatsune miku'), '长按「初音未来」弹出改名框，显示英文标签');
+  await page.fill('.dialog [data-zh]', '初音ミク');
+  await page.click('.dialog [data-ok]');
+  await page.waitForFunction(() => [...document.querySelectorAll('#g-chips button')].some((b) => b.textContent === '初音ミク2'));
+  ok(true, '筛选条马上换成新名字');
+  ok((await page.$$('.thumb')).length === 4, '长按改名不会误点成筛选');
+  ok(JSON.stringify(await page.evaluate(() => Store.get('tagZh'))) === '{"hatsune miku":"初音ミク"}', '改的名字存起来了');
+  await page.fill('#g-q', 'ミク');
+  await page.waitForFunction(() => document.querySelectorAll('.thumb').length === 2, null, { timeout: 3000 }).catch(() => {});
+  ok((await page.$$('.thumb')).length === 2, '用新名字能搜到');
+  await page.fill('#g-q', '');
+  await page.waitForFunction(() => document.querySelectorAll('.thumb').length === 4);
+  ok(await page.evaluate(() => TagLib.candidates('画一个初音ミク').some((c) => c[1] === 'hatsune miku')), '写提示词时的参考也认新名字');
+  // 标签库里也是新名字，长按一行能恢复原译
+  await page.evaluate(() => TagLib.open());
+  await page.waitForSelector('.tg-row');
+  await page.fill('.tg-q', 'hatsune miku');
+  await page.waitForFunction(() => { const r = document.querySelector('.tg-row'); return r && r.dataset.t === 'hatsune miku'; });
+  ok(await page.$eval('.tg-row .tg-zh', (z) => z.textContent === '初音ミク' && z.classList.contains('mine')), '标签库中文列显示改过的名字，有标记');
+  const row = await page.$('.tg-row'); const rb = await row.boundingBox();
+  await page.mouse.move(rb.x + 20, rb.y + 10); await page.mouse.down(); await page.waitForTimeout(650); await page.mouse.up();
+  await page.waitForSelector('.dialog [data-reset]');
+  ok((await page.textContent('.dialog p')).includes('初音未来'), '改名框里显示原来的翻译');
+  await page.click('.dialog [data-reset]');
+  await page.waitForFunction(() => document.querySelector('.tg-row .tg-zh').textContent === '初音未来');
+  ok(JSON.stringify(await page.evaluate(() => Store.get('tagZh'))) === '{}', '恢复原译后不再存');
+  await page.evaluate(() => window.__appBack());
+  // 重开后改的名字还在
+  await page.evaluate(() => TagLib.setZh('vocaloid', 'VOCALOID'));
+  await page.reload();
+  await page.waitForSelector('#c-tag');
+  await page.click('#tabbar [data-tab="gallery"]');
+  await page.waitForFunction(() => [...document.querySelectorAll('#g-chips button')].some((b) => b.textContent === '作品VOCALOID1'), null, { timeout: 5000 }).catch(() => {});
+  ok(await page.evaluate(() => [...document.querySelectorAll('#g-chips button')].some((b) => b.textContent === '作品VOCALOID1')), '重开后改的名字还在');
+  await page.screenshot({ path: OUT + '/改中文名.png' });
+
   await browser.close(); srv.close();
   console.log(fails.length ? '\n失败 ' + fails.length + ' 项：\n' + fails.join('\n') : '\n全部通过');
   process.exit(fails.length ? 1 : 0);

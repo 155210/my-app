@@ -199,6 +199,8 @@ textarea.ta.small { min-height: 56px; }
 .g-chips button { flex: none; border: 1px solid var(--line); background: none; border-radius: 999px; padding: 3px 11px; color: var(--dim); font-size: 13px; white-space: nowrap; }
 .g-chips button span { margin-left: 5px; color: var(--faint); font-size: 11px; }
 .g-chips button i { font-style: normal; font-size: 10px; border: 1px solid var(--line); border-radius: 4px; padding: 0 3px; margin-right: 4px; color: var(--faint); }
+.g-chips button { -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; }
+.g-hint { font-size: 11px; color: var(--faint); margin-top: 2px; }
 .g-chips button.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
 .g-chips button.on span, .g-chips button.on i { color: var(--accent-ink); border-color: var(--accent-ink); }
 .check.radio input { width: 20px; height: 20px; accent-color: var(--accent); flex: none; align-self: flex-start; margin-top: 3px; }
