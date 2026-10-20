@@ -13,6 +13,9 @@
     let tagMap = null;   // 英文标签 → 标签库条目 [英文, 中文, 热度, 类别]，只留角色和作品（中文读条目本身，改了名立刻生效）
     let tagLoading = null;
     let otherTags = null; // 标签库里别的类别（衣服、动作…），带括号的普通标签不当成角色
+    let qualStat = null;  // 括号里的说明（genshin impact / medium / symbol…）在标签库里多数是角色还是普通标签
+    let zhMap = {};       // 标签库里没中文的：{ 英文: { zh, by: 'ai' | 'me' } }，存 Store 'charZh'
+    const zhReady = window.Store ? Store.get('charZh', {}).then((v) => { zhMap = v || {}; }).catch(() => {}) : Promise.resolve();
 
     function loadTags() {
         if (tagMap) return Promise.resolve(tagMap);
@@ -21,7 +24,12 @@
             tagLoading = TagLib.load().then((tags) => {
                 tagMap = new Map();
                 otherTags = new Set();
-                for (const t of tags) if (t[3] === 4 || t[3] === 3) tagMap.set(t[0], t); else otherTags.add(t[0]);
+                qualStat = new Map();
+                for (const t of tags) {
+                    if (t[3] === 4 || t[3] === 3) tagMap.set(t[0], t); else otherTags.add(t[0]);
+                    const q = /\(([^()]+)\)$/.exec(t[0]);
+                    if (q) { const st = qualStat.get(q[1]) || { char: 0, other: 0 }; if (t[3] === 4 || t[3] === 3) st.char++; else st.other++; qualStat.set(q[1], st); }
+                }
                 return tagMap;
             }).catch(() => { tagLoading = null; return null; });
         }
@@ -55,7 +63,7 @@
             const byName = libNames(c).some((n) => text.includes(lower(n)));
             const byFandom = fandom && fandom.split(/\s*,\s*/).some((f) => tags.has(f));
             if (byName || byFandom) {
-                add({ key: 'lib:' + c.id, label: c.name, en: fandom, kind: 'char' });
+                add({ key: 'lib:' + c.id, label: c.name, en: fandom, kind: 'char', zh: true });
                 if (fandom) fandom.split(/\s*,\s*/).forEach((f) => covered.add(f));
             }
         }
@@ -64,13 +72,16 @@
                 if (covered.has(t)) continue;
                 const c = window.TagLib && TagLib.loaded && TagLib.canon ? TagLib.canon(t) : ''; // 别名、写法不一样的也认
                 const hit = tm.get(t) || (c && tm.get(c));
-                if (hit) { add({ key: 'tag:' + hit[0], label: hit[1] || hit[0], en: hit[0], kind: hit[3] === 4 ? 'char' : 'work' }); continue; }
+                if (hit) { add({ key: 'tag:' + hit[0], label: hit[1] || zhOf(hit[0]) || hit[0], en: hit[0], kind: hit[3] === 4 ? 'char' : 'work', zh: !!(hit[1] || zhOf(hit[0])) }); continue; }
                 // 标签库里没有的新角色：AI 常写成「名字 (作品)」。去掉括号能对上就归到那个角色，对不上也单独列出来（用英文名）
                 const m = /^(.+?)\s*\(([^()]+)\)$/.exec(t);
-                if (!m || (otherTags && (otherTags.has(t) || otherTags.has(m[1]) || (c && otherTags.has(c))))) continue; // 弓 (武器) 这类普通标签不算
+                if (!m || /^[^()]*:/.test(t)) continue; // artist:xxx 这类带前缀的是画师 / 特殊写法，不是人物
+                if (otherTags && (otherTags.has(t) || otherTags.has(m[1]) || (c && otherTags.has(c)))) continue; // 弓 (武器) 这类普通标签不算
+                const qs = qualStat && qualStat.get(m[2]);
+                if (qs && qs.other >= qs.char) continue; // canvas (medium)、xx (symbol)：括号里这个说法在标签库里多半是普通标签
                 const base = tm.get(m[1]);
-                if (base && base[3] === 4) { if (!covered.has(m[1])) add({ key: 'tag:' + m[1], label: base[1] || m[1], en: m[1], kind: 'char' }); continue; }
-                add({ key: 'tag:' + t, label: t, en: t, kind: 'char' });
+                if (base && base[3] === 4) { if (!covered.has(m[1])) add({ key: 'tag:' + m[1], label: base[1] || zhOf(m[1]) || m[1], en: m[1], kind: 'char', zh: !!(base[1] || zhOf(m[1])) }); continue; }
+                add({ key: 'tag:' + t, label: zhOf(t) || t, en: t, kind: 'char', zh: !!zhOf(t), unknown: true });
             }
         }
         return out;
@@ -83,6 +94,7 @@
             try { await CharLib.ready; lib = CharLib.list || []; } catch (e) { /* 角色库读不到就只用标签库 */ }
         }
         const tm = await loadTags();
+        await zhReady;
         const map = new Map();
         for (const it of items) map.set(it.id, detect(it, lib, tm));
         return map;
@@ -107,5 +119,46 @@
         return words.every((w) => hay.includes(w.replace(/_/g, ' ')));
     }
 
-    window.GalleryChars = { index, chips, matches, detect, normTag };
+    // ------------------------------------------------------------
+    // 没中文名的标签：自己起名、让 AI 翻译（自己起的 AI 不会覆盖）
+    // ------------------------------------------------------------
+    const zhOf = (en) => (zhMap[en] && zhMap[en].zh) || '';
+    async function setZh(en, zh, by) {
+        await zhReady;
+        zh = String(zh || '').trim();
+        if (!zh) delete zhMap[en]; else zhMap[en] = { zh, by: by || 'me' };
+        await Store.set('charZh', zhMap);
+    }
+    const mine = (en) => !!(zhMap[en] && zhMap[en].by === 'me');
+
+    const PROMPT = '你是动漫游戏角色名翻译。用户给一组 Danbooru 角色 / 作品标签（英文，括号里是出自的作品），'
+        + '给出中文圈最常用的简体中文译名：角色用官方或通行译名，只写名字不带作品名；作品用中文常用名。不确定就音译。'
+        + '只输出一个 JSON 对象，键是原样的英文标签，值是中文名，不要别的内容。';
+    /** 一次翻一批，返回翻好了几个 */
+    async function translate(list) {
+        await zhReady;
+        const todo = [...new Set(list)].filter((en) => !mine(en)).slice(0, 80);
+        if (!todo.length) return 0;
+        const api = UI.settings.ai;
+        if (!String(api.url || '').trim() || !String(api.model || '').trim()) throw new Error('要先在设置 → AI 接口里填好地址和模型');
+        const r = await Api.chat({
+            api, model: api.model,
+            messages: [{ role: 'system', content: PROMPT }, { role: 'user', content: todo.join('\n') }],
+            params: { stream: false, temperature: 0.2 },
+        });
+        const text = String(r.content || '').replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '');
+        const j = text.match(/\{[\s\S]*\}/);
+        if (!j) throw new Error('AI 回的不是 JSON');
+        let obj;
+        try { obj = JSON.parse(j[0]); } catch (e) { throw new Error('AI 回的 JSON 格式不对'); }
+        let n = 0;
+        for (const en of todo) {
+            const zh = String(obj[en] || '').trim();
+            if (zh && zh !== en && !mine(en)) { zhMap[en] = { zh, by: 'ai' }; n++; }
+        }
+        await Store.set('charZh', zhMap);
+        return n;
+    }
+
+    window.GalleryChars = { index, chips, matches, detect, normTag, setZh, zhOf, translate, isMine: mine };
 })();

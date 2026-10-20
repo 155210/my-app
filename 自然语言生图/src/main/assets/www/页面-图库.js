@@ -104,10 +104,10 @@
             + '<button data-view="+" class="add">＋ 相册</button></div>'
             + '<select id="g-sort" aria-label="排序">' + Gallery.SORTS.map(([k, t]) => '<option value="' + k + '"' + (k === p.sort ? ' selected' : '') + '>' + t + '</option>').join('') + '</select></div>';
         const filterRow = viewRow + '<div class="g-filter"><input type="search" id="g-q" placeholder="搜角色、描述、标签（中文英文都行）" value="' + esc(filt.q) + '">'
-            + (chipList.length ? '<div class="g-chips" id="g-chips"><button data-key=""' + (filt.key ? '' : ' class="on"') + '>全部<span>' + all.filter(inView).length + '</span></button>'
-                + chipList.map((c) => '<button data-key="' + esc(c.key) + '"' + (c.key === filt.key ? ' class="on"' : '') + ' title="' + esc(c.en || '') + '">'
-                    + (c.kind === 'work' ? '<i>作品</i>' : '') + esc(c.label) + '<span>' + c.n + '</span></button>').join('') + '</div>'
-                + '<div class="g-hint">长按名字可以改中文名</div>' : '')
+            + (chipList.length ? '<div class="g-chiprow"><div class="g-chips" id="g-chips"><button data-key=""' + (filt.key ? '' : ' class="on"') + '>全部<span>' + all.filter(inView).length + '</span></button>'
+                + chipList.map((c) => chipHtml(c, c.key === filt.key)).join('') + '</div>'
+                + '<button class="btn small" id="g-chip-more">' + chipList.length + ' 个 ▾</button></div>'
+                + '<div class="g-hint">长按名字可以改中文名，点右边看全部</div>' : '')
             + '</div>';
         r.innerHTML = (sel
             ? '<div class="g-bar sel-bar"><button class="icon-btn" id="g-sel-x" aria-label="退出多选">' + UI.ICON.close + '</button>'
@@ -164,16 +164,8 @@
                 filt.key = b.dataset.key === filt.key ? '' : b.dataset.key;
                 refresh();
             };
-            // 长按名字改名：标签库里的标签改中文名；角色库的角色打开角色编辑
-            onLongPress(chipBox, (e) => e.target.closest && e.target.closest('[data-key]:not([data-key=""])'), async (b) => {
-                const key = b.dataset.key;
-                if (key.startsWith('tag:') && window.TagLib) {
-                    if (await TagLib.editZh(key.slice(4)) !== null) refresh();
-                } else if (key.startsWith('lib:') && window.CharLib) {
-                    const c = CharLib.list.find((x) => 'lib:' + x.id === key);
-                    if (c) CharLib.edit(c, () => refresh());
-                }
-            });
+            onLongPress(chipBox, (e) => e.target.closest && e.target.closest('[data-key]:not([data-key=""])'), (b) => renameChip(b.dataset.key, refresh));
+            $('#g-chip-more', r).onclick = () => openChipPanel(chipList);
         }
         onLongPress(grid, (e) => e.target.closest && e.target.closest('[data-id]'), (b) => { if (sel) toggle(b); else thumbMenu(b.dataset.id); });
         if (sel) bindSelBar(r, items);
@@ -201,6 +193,76 @@
             }), { rootMargin: '300px 0px' });
             r.querySelectorAll('.thumb').forEach((t) => observer.observe(t));
         }
+    }
+
+    // ------------------------------------------------------------
+    // 人物 / 作品标签：改名、全部列表（搜索、分组）、AI 翻成中文
+    // ------------------------------------------------------------
+    const chipHtml = (c, on) => '<button data-key="' + esc(c.key) + '"' + (on ? ' class="on"' : '') + ' title="' + esc(c.en || '') + '">'
+        + (c.kind === 'work' ? '<i>作品</i>' : '') + esc(c.label) + '<span>' + c.n + '</span></button>';
+
+    /** 长按改名：标签库里有的改标签库的中文名；标签库没有的新人物存图库自己的；角色库的角色打开角色编辑 */
+    async function renameChip(key, done) {
+        if (key.startsWith('lib:') && window.CharLib) {
+            const c = CharLib.list.find((x) => 'lib:' + x.id === key);
+            if (c) CharLib.edit(c, () => done());
+            return;
+        }
+        if (!key.startsWith('tag:')) return;
+        const en = key.slice(4);
+        const inLib = window.TagLib && (await TagLib.load(), TagLib.get(en));
+        if (inLib && inLib[1]) { if (await TagLib.editZh(en) !== null) done(); return; }
+        const zh = await ask('改中文名', GalleryChars.zhOf(en), en, '保存');
+        if (zh === null) return;
+        await GalleryChars.setZh(en, zh, 'me');
+        toast('success', '改成「' + zh + '」');
+        done();
+    }
+
+    function openChipPanel(list) {
+        let q = '';
+        const L = UI.openLayer('sheet', '<div class="grip"></div><h3>人物和作品</h3>'
+            + '<input type="search" class="g-cp-q" placeholder="搜名字（中文英文都行）">'
+            + '<div class="g-cp-body"></div>'
+            + '<div class="btns"><button class="btn" data-tr></button><button class="btn primary" data-close>关闭</button></div>');
+        const body = $('.g-cp-body', L.box), trBtn = $('[data-tr]', L.box);
+        const draw = () => {
+            const k = q.trim().toLowerCase();
+            const hit = list.filter((c) => !k || (c.label + ' ' + (c.en || '')).toLowerCase().includes(k));
+            const group = (kind, title) => {
+                const g = hit.filter((c) => c.kind === kind);
+                return g.length ? '<div class="section-title">' + title + ' · ' + g.length + '</div><div class="g-chips wrap">' + g.map((c) => chipHtml(c, c.key === filt.key)).join('') + '</div>' : '';
+            };
+            body.innerHTML = (hit.length ? group('char', '人物') + group('work', '作品') : '<div class="empty">没有符合的</div>')
+                + '<div class="g-hint">点一下只看这个人物；长按改中文名</div>';
+            const noZh = list.filter((c) => !c.zh && c.key.startsWith('tag:')).length;
+            trBtn.textContent = noZh ? 'AI 翻成中文（' + noZh + ' 个）' : '都有中文名了';
+            trBtn.disabled = !noZh;
+        };
+        draw();
+        $('.g-cp-q', L.box).oninput = (e) => { q = e.target.value; draw(); };
+        body.addEventListener('click', (e) => {
+            const b = e.target.closest('[data-key]'); if (!b) return;
+            filt.key = b.dataset.key === filt.key ? '' : b.dataset.key;
+            UI.closeLayer(L);
+            refresh();
+        });
+        onLongPress(body, (e) => e.target.closest && e.target.closest('[data-key]'), (b) => renameChip(b.dataset.key, async () => { UI.closeLayer(L); await refresh(); }));
+        trBtn.onclick = async () => {
+            const ens = list.filter((c) => !c.zh && c.key.startsWith('tag:')).map((c) => c.key.slice(4));
+            trBtn.disabled = true;
+            trBtn.textContent = '翻译中…';
+            try {
+                let n = 0;
+                for (let i = 0; i < ens.length; i += 80) n += await GalleryChars.translate(ens.slice(i, i + 80));
+                toast('success', '翻好了 ' + n + ' 个，用的是你的 AI 接口，不花 Anlas。翻得不对长按改');
+                UI.closeLayer(L);
+                await refresh();
+            } catch (err) {
+                toast('error', err.message || String(err), '翻译失败');
+                draw();
+            }
+        };
     }
 
     // ------------------------------------------------------------

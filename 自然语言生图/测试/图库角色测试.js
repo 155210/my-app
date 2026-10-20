@@ -51,14 +51,14 @@ const fails = []; const ok = (c, m) => { if (!c) fails.push(m); console.log((c ?
     const items = [
       { id: 'a', desc: '', tag: '1girl, zzyzx girl (my original series), smile', meta: {} },
       { id: 'b', desc: '', tag: '1girl, hatsune miku (vocaloid)', meta: {} },
-      { id: 'c', desc: '', tag: '1girl, bow (weapon), star (sky), shirt', meta: {} },
+      { id: 'c', desc: '', tag: '1girl, bow (weapon), star (sky), shirt, canvas (medium), artist:hoshi (snacherubi), 0.8::artist:abc (def)::', meta: {} },
     ];
     const m = await GalleryChars.index(items);
     return items.map((x) => m.get(x.id).map((c) => c.label + ':' + c.kind).join(' '));
   });
   ok(det2[0] === 'zzyzx girl (my original series):char', '标签库里没有的新角色也列出来：' + det2[0]);
   ok(det2[1] === '初音未来:char', '「名字 (作品)」括号前对得上已有角色就算那个角色：' + det2[1]);
-  ok(det2[2] === '', '弓 (武器)、星星 (天空) 这类带括号的普通标签不算角色：' + det2[2]);
+  ok(det2[2] === '', '弓 (武器)、canvas (medium)、artist:画师 这些都不算人物：' + det2[2]);
 
   // 界面：筛选条
   await page.click('#tabbar [data-tab="gallery"]');
@@ -143,6 +143,53 @@ const fails = []; const ok = (c, m) => { if (!c) fails.push(m); console.log((c ?
   await page.waitForFunction(() => [...document.querySelectorAll('#g-chips button')].some((b) => b.textContent === '作品VOCALOID1'), null, { timeout: 5000 }).catch(() => {});
   ok(await page.evaluate(() => [...document.querySelectorAll('#g-chips button')].some((b) => b.textContent === '作品VOCALOID1')), '重开后改的名字还在');
   await page.screenshot({ path: OUT + '/改中文名.png' });
+
+  // ---------- 全部标签列表、AI 翻成中文、给新人物起名 ----------
+  let aiAsk = '';
+  await page.route('https://ai.test/**', async (r) => {
+    if (r.request().method() === 'OPTIONS') return r.fulfill({ status: 204, headers: CORS });
+    aiAsk = JSON.parse(r.request().postData()).messages.map((m) => m.content).join('\n');
+    return r.fulfill({ headers: { ...CORS, 'content-type': 'application/json' }, body: JSON.stringify({ choices: [{ message: { content: '好的：{"zzyzx girl (my original series)": "兹兹女孩", "kafka (honkai: star rail)": "卡芙卡"}' } }] }) });
+  });
+  await page.evaluate(async () => {
+    Object.assign(UI.settings.ai, { url: 'https://ai.test/v1', model: 'm', key: 'x' }); UI.saveSettings();
+    const c = document.createElement('canvas'); c.width = 32; c.height = 48;
+    const b = await new Promise((r) => c.toBlob(r, 'image/png'));
+    await Gallery.add(b, 'png', { desc: '新人物', tag: '1girl, zzyzx girl (my original series), canvas (medium)', meta: { positive: '1girl, zzyzx girl (my original series), canvas (medium)' } });
+    await Gallery.add(b, 'png', { desc: '星铁', tag: '1girl, kafka (honkai: star rail)', meta: { positive: '1girl, kafka (honkai: star rail)' } });
+    await GalleryPage.refresh();
+  });
+  await page.waitForSelector('#g-chip-more');
+  ok(!(await page.$$eval('#g-chips button', (b) => b.map((x) => x.textContent))).some((t) => t.includes('canvas')), '筛选条里没有 canvas (medium)');
+  await page.click('#g-chip-more');
+  await page.waitForSelector('.g-cp-body [data-key]');
+  const groups = await page.$$eval('.g-cp-body .section-title', (x) => x.map((e) => e.textContent));
+  ok(groups.length === 2 && groups[0].startsWith('人物') && groups[1].startsWith('作品'), '点「N 个 ▾」打开全部列表，分人物、作品：' + groups.join(' / '));
+  await page.fill('.g-cp-q', 'zzyzx');
+  ok((await page.$$('.g-cp-body [data-key]')).length === 1, '列表里能搜');
+  await page.fill('.g-cp-q', '');
+  ok((await page.textContent('[data-tr]')).includes('AI 翻成中文'), '有「AI 翻成中文」按钮：' + await page.textContent('[data-tr]'));
+  // 先自己给一个起名，AI 不覆盖
+  await page.evaluate(() => GalleryChars.setZh('kafka (honkai: star rail)', '我的卡芙卡', 'me'));
+  await page.click('[data-tr]');
+  await page.waitForFunction(() => [...document.querySelectorAll('#g-chips button')].some((b) => b.textContent.startsWith('兹兹女孩')), null, { timeout: 5000 }).catch(() => {});
+  const chips3 = await page.$$eval('#g-chips button', (b) => b.map((x) => x.textContent));
+  ok(chips3.some((t) => t.startsWith('兹兹女孩')), 'AI 翻译后筛选条显示中文：' + chips3.join(' / '));
+  ok(chips3.some((t) => t.startsWith('我的卡芙卡')) && !aiAsk.includes('kafka'), '自己起的名字不发给 AI、不被覆盖');
+  ok(JSON.stringify(await page.evaluate(() => Store.get('charZh'))).includes('兹兹女孩'), '翻译结果存起来了');
+  // 长按新人物改名
+  const zz = await page.$('#g-chips button[data-key="tag:zzyzx girl (my original series)"]'); const zb = await zz.boundingBox();
+  await page.mouse.move(zb.x + 10, zb.y + 5); await page.mouse.down(); await page.waitForTimeout(650); await page.mouse.up();
+  await page.waitForSelector('.dialog [data-v]');
+  await page.fill('.dialog [data-v]', '小兹');
+  await page.click('.dialog [data-ok]');
+  await page.waitForFunction(() => [...document.querySelectorAll('#g-chips button')].some((b) => b.textContent.startsWith('小兹')));
+  ok(true, '标签库里没有的新人物也能长按改中文名');
+  await page.click('#g-chip-more');
+  await page.click('.g-cp-body [data-key="tag:zzyzx girl (my original series)"]');
+  await page.waitForFunction(() => document.querySelectorAll('.thumb').length === 1);
+  ok(true, '在列表里点一个 → 只看这个人物');
+  await page.screenshot({ path: OUT + '/人物列表.png' });
 
   await browser.close(); srv.close();
   console.log(fails.length ? '\n失败 ' + fails.length + ' 项：\n' + fails.join('\n') : '\n全部通过');
