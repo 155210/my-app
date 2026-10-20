@@ -169,6 +169,31 @@ const fails = []; const ok = (c, m) => { if (!c) fails.push(m); console.log((c ?
   ok(await page.$eval('#c-preset select', (s) => s.selectedOptions[0].textContent) === '双人竖图', '重开后预设还在、还是选中的');
   ok(await page.evaluate(async () => { await TagLib.load(); await TagWiki.load(); return !!(await Store.get('wikiZh', {}))['long hair']; }), '重开后译文还在');
 
+  // ---------- 单行框也能中文联想 ----------
+  await page.evaluate(() => { Characters.set([{ tag: 'girl' }, { tag: 'boy' }]); CreatePage.refresh(); });
+  await page.click('#c-chars [data-a="act-add"]');
+  await page.fill('#c-chars input[data-g="act"]', '');
+  await page.focus('#c-chars input[data-g="act"]');
+  await page.keyboard.type('拥抱');
+  await page.waitForSelector('.pe-strip:not([hidden]) button[data-t="hug"]');
+  ok(await page.evaluate(() => { const s = document.querySelector('.pe-strip'); return s.previousElementSibling === document.querySelector('#c-chars input[data-g="act"]').closest('.row'); }), '互动动作框打中文出联想，联想条在那一行下面');
+  await page.click('.pe-strip button[data-t="hug"]');
+  ok(await page.evaluate(() => Characters.getActs()[0].act === 'hug'), '点联想后互动动作变成 hug（不补逗号）');
+  await page.evaluate(() => {
+    const r = document.createElement('div'); r.className = 'row';
+    r.innerHTML = '<input type="text" data-f="hair" id="t-hair"><button>x</button>';
+    document.querySelector('#view-create').appendChild(r);
+  });
+  await page.waitForFunction(() => document.querySelector('#t-hair').dataset.pe);
+  await page.focus('#t-hair');
+  await page.keyboard.type('黑发');
+  await page.waitForSelector('.pe-strip:not([hidden]) button[data-t="black hair"]');
+  await page.click('.pe-strip button[data-t="black hair"]');
+  ok(await page.$eval('#t-hair', (e) => e.value) === 'black hair, ', '角色库这类外貌栏打「黑发」选完变成 black hair');
+  ok(await page.evaluate(() => !document.querySelector('#t-hair').previousElementSibling || !document.querySelector('#t-hair').previousElementSibling.classList.contains('pe-back')), '单行框不垫高亮层');
+  ok(await page.evaluate(() => ['input[data-ps="customPose"]', 'input[data-ws]', 'textarea[data-f="negative"]', 'input[type="text"][data-p]'].every((q) => { const d = document.createElement('div'); d.innerHTML = q.startsWith('textarea') ? '<textarea data-f="negative"></textarea>' : q.includes('data-ps') ? '<input data-ps="customPose">' : q.includes('data-ws') ? '<input data-ws="top">' : '<input type="text" data-p>'; return d.firstChild.matches(PromptEdit.SEL); })), '写真、衣柜、表情上色、图生图的格子都在名单里');
+  await page.evaluate(() => document.querySelector('#t-hair').closest('.row').remove());
+
   // 设置页：通配符、开关
   await page.click('#btn-settings');
   await page.click('.tabs button[data-tab="wildcards"]');

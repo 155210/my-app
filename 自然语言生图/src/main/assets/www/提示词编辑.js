@@ -16,7 +16,13 @@
     const { $, esc } = UI;
     const SEL = ['#c-tag', '#c-neg', '#c-chars textarea[data-f]', 'textarea[data-k$="prefix"]', 'textarea[data-k$="suffix"]',
         'textarea[data-k^="nai.styles"][data-k$="quality"]', 'textarea[data-k$=".uc"]', 'textarea[data-k^="nai.styles"][data-k$="negative"]',
-        'textarea[data-k="nai.quality"]', 'textarea[data-k="nai.negative"]'].join(',');
+        'textarea[data-k="nai.quality"]', 'textarea[data-k="nai.negative"]',
+        // 图生图「编辑这张图」、通配符的每一行
+        'textarea[data-f="tag"]', 'textarea[data-f="negative"]', 'textarea[data-k^="tags.wildcards"][data-k$=".lines"]',
+        // 单行的：多角色互动动作、写真自己补的姿势/场景、衣柜每件衣服、表情/上色提示词、角色库外貌各栏；以后的格子加 data-tags 就行
+        '#c-chars input[data-g="act"]', 'input[data-ps="customPose"]', 'input[data-ps="customScene"]', 'input[data-ws]', 'input[type="text"][data-p]',
+        ...['fandom', 'sex', 'hair', 'eyes', 'skin', 'body', 'extra', 'outfit'].map((k) => 'input[type="text"][data-f="' + k + '"]'),
+        'textarea[data-tags]', 'input[data-tags]'].join(',');
     const opt = () => UI.settings.tags || {};
     const V3 = () => Params.isV3(UI.settings.nai.model);
 
@@ -82,9 +88,11 @@
     function pick(ta, tag) {
         const t = tokenAt(ta.value, ta.selectionStart);
         const s = t.pre + tag + t.post;
-        const atEnd = !/\S/.test(ta.value.slice(t.end).replace(/^[,，\s]*/, '')) && !/[,，]\s*$/.test(ta.value.slice(t.end));
+        const one = ta.tagName === 'INPUT' && ta.dataset.g === 'act'; // 互动动作只填一个标签，不补逗号
+        const atEnd = !one && !/\S/.test(ta.value.slice(t.end).replace(/^[,，\s]*/, '')) && !/[,，]\s*$/.test(ta.value.slice(t.end));
         if (atEnd) replaceRange(ta, t.start, ta.value.length, s + ', ');
         else replaceRange(ta, t.start, t.end, s);
+        if (ta.tagName === 'INPUT') ta.dispatchEvent(new Event('change', { bubbles: true }));
     }
 
     // ------------------------------------------------------------
@@ -137,7 +145,9 @@
             + (known && window.TagWiki ? '<button data-a="wiki" data-t="' + esc(known) + '" class="pe-i">ⓘ ' + esc((TagLib.get(known) || [])[1] || '说明') + '</button>' : '')
             + chips;
         if (!s.innerHTML) { hide(); return; }
-        if (s.previousElementSibling !== ta) ta.after(s);
+        // 单行框常和按钮挤在一行（.row）里，联想条放到那一行下面
+        const at = ta.tagName === 'INPUT' ? (ta.closest('.row') || ta) : ta;
+        if (s.previousElementSibling !== at) at.after(s);
         s.hidden = false;
         s.scrollLeft = 0;
     }
@@ -203,12 +213,16 @@
     const COPY = ['fontFamily', 'fontSize', 'fontWeight', 'lineHeight', 'letterSpacing', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
         'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth', 'borderRadius', 'tabSize', 'wordSpacing', 'textIndent'];
     const proto = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value');
+    const protoIn = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
 
     function attach(ta) {
         if (ta.dataset.pe) return;
         ta.dataset.pe = '1';
+        const one = ta.tagName === 'INPUT'; // 单行框只联想、调权重，不垫高亮
+        const P = one ? protoIn : proto;
         let back = null;
         const draw = () => {
+            if (one) return;
             if (!opt().highlight || !ta.isConnected) { if (back) { back.remove(); back = null; ta.classList.remove('pe-on'); } return; }
             if (!back) {
                 back = document.createElement('div');
@@ -230,15 +244,16 @@
         };
         Object.defineProperty(ta, 'value', {
             configurable: true,
-            get() { return proto.get.call(this); },
-            set(v) { proto.set.call(this, v); draw(); if (cur === ta) update(); },
+            get() { return P.get.call(this); },
+            set(v) { P.set.call(this, v); draw(); if (cur === ta) update(); },
         });
-        ta.addEventListener('input', () => { draw(); if (cur === ta) update(); });
+        // 挂上之前就已经点进去的格子没有 focus 事件，打字时补上
+        ta.addEventListener('input', () => { draw(); if (document.activeElement === ta) { clearTimeout(hideT); cur = ta; } if (cur === ta) update(); });
         ta.addEventListener('scroll', () => { if (back) back.scrollTop = ta.scrollTop; });
         ta.addEventListener('focus', () => { clearTimeout(hideT); cur = ta; update(); });
         ta.addEventListener('blur', () => { hideT = setTimeout(() => { if (cur === ta) { cur = null; hide(); } }, 150); });
         ['click', 'keyup'].forEach((n) => ta.addEventListener(n, () => { if (cur === ta) update(); }));
-        if (window.ResizeObserver) new ResizeObserver(draw).observe(ta);
+        if (window.ResizeObserver && !one) new ResizeObserver(draw).observe(ta);
         ta.__peDraw = draw;
         draw();
     }
@@ -273,5 +288,5 @@
         + '.pe-strip .pe-i{color:var(--accent);border-color:rgba(226,166,91,.5)}'
         + '</style>');
 
-    window.PromptEdit = { tokenAt, parseWeight, withWeight, highlight, bump, pick, attach };
+    window.PromptEdit = { tokenAt, parseWeight, withWeight, highlight, bump, pick, attach, SEL };
 })();
