@@ -174,9 +174,9 @@
         }).finally(refresh);
     }
 
-    /** 重绘：同一套提示词换个种子再出一张 */
+    /** 重绘：同一套提示词（连同那张图的角色）换个种子再出一张 */
     function redraw(item) {
-        draw({ desc: item.desc, tag: item.tag, nl: item.nl, negative: item.extraNegative, size: item.meta.size, seed: randomSeed() }, 1);
+        draw({ desc: item.desc, tag: item.tag, nl: item.nl, negative: item.extraNegative, size: item.meta.size, seed: randomSeed(), characters: item.meta.characters || [] }, 1);
     }
 
     let urls = [], showSeq = 0;

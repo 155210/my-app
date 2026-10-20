@@ -211,3 +211,13 @@ pre.recipe { margin: 0 0 12px; padding: 8px 10px; border-radius: 10px; backgroun
 #anlas-chip { background: none; padding: 2px 8px; font-size: 12px; }
 #anlas-chip.low { color: var(--danger); border-color: rgba(224, 100, 92, .5); }
 .style-card.on { border-color: rgba(226, 166, 91, .6); }
+
+/* 多角色、画风参考图（多角色.js、参考图.js） */
+.char-item, .vibe-item { border-top: 1px solid var(--line); margin-top: 10px; padding-top: 10px; }
+.char-item .field { margin: 8px 0 6px; }
+.vibe-thumb { width: 56px; height: 56px; flex: none; border-radius: 8px; object-fit: cover; background: var(--bg3); }
+.vibe-item input[type=text] { padding: 6px 8px; }
+.vibe-slider { display: flex; align-items: center; gap: 8px; margin: 6px 0; font-size: 13px; color: var(--dim); }
+.vibe-slider span { width: 5em; flex: none; }
+.vibe-slider input { flex: 1; min-width: 0; accent-color: var(--accent); }
+.vibe-slider b { width: 2.6em; text-align: right; font-weight: 400; color: var(--text); }
