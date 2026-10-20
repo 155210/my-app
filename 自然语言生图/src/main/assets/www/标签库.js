@@ -7,6 +7,8 @@
  *  2. AI 写完后：对照标签库纠正写法（hires → highres、blue eye → blue eyes、下划线、大小写…），重复的去掉（Writer.addFilter）
  *
  * 数据：依赖/标签.json，由 工具/做标签库.py 生成，格式见那个脚本。
+ * 中文翻译不好的可以自己改（标签库里长按一行、图库筛选条长按名字）：存在 Store 的 tagZh 键 { 英文: 中文 }，
+ * 读进来时直接覆盖条目的中文，搜索、候选、图库筛选都用改过的；设置导出时自动带上。
  */
 (function () {
     'use strict';
@@ -26,6 +28,9 @@
     let alias = {};       // 别名 → 英文
     let zhIndex = null;   // 中文 → 条目（同一个中文取最热的那个）
     let loading = null;
+    let zhOver = {};      // 自己改的中文：英文 → 中文
+    const zhOrig = new Map(); // 被改过的条目原来的中文，恢复用
+    const zhListeners = [];
 
     function load() {
         if (tags) return Promise.resolve(tags);
@@ -33,15 +38,64 @@
             loading = fetch('依赖/标签.json').then((r) => {
                 if (!r.ok) throw new Error('标签库数据读不到（' + r.status + '）');
                 return r.json();
-            }).then((d) => {
+            }).then(async (d) => {
                 tags = d.tags;
                 alias = d.alias || {};
                 byName = new Map();
                 for (const t of tags) byName.set(t[0], t);
+                try { zhOver = (await Store.get('tagZh', {})) || {}; } catch (e) { zhOver = {}; }
+                Object.keys(zhOver).forEach((en) => applyZh(en));
                 return tags;
             }).catch((e) => { loading = null; throw e; });
         }
         return loading;
+    }
+
+    function applyZh(en) {
+        const t = byName && byName.get(en);
+        if (!t) return;
+        if (!zhOrig.has(en)) zhOrig.set(en, t[1] || '');
+        t[1] = zhOver[en] !== undefined ? zhOver[en] : zhOrig.get(en);
+    }
+
+    /** 改一个标签的中文名；空着或和原译一样 = 恢复原译 */
+    async function setZh(en, zh) {
+        await load();
+        zh = String(zh || '').trim();
+        const t = byName.get(en);
+        if (!t) throw new Error('标签库里没有 ' + en);
+        const orig = zhOrig.has(en) ? zhOrig.get(en) : (t[1] || '');
+        if (!zh || zh === orig) delete zhOver[en]; else zhOver[en] = zh;
+        applyZh(en);
+        zhIndex = null;
+        await Store.set('tagZh', zhOver);
+        zhListeners.forEach((fn) => { try { fn(en, t[1]); } catch (e) { console.warn(e); } });
+        return t[1];
+    }
+    const zhEdited = (en) => zhOver[en] !== undefined;
+    const origZh = (en) => (zhOrig.has(en) ? zhOrig.get(en) : ((byName && byName.get(en)) || [])[1] || '');
+
+    /** 改中文名的对话框；改了返回新名字，没改返回 null */
+    async function editZh(en) {
+        await load();
+        const t = byName.get(en);
+        if (!t) { toast('warning', '标签库里没有这个标签'); return null; }
+        return new Promise((resolve) => {
+            let done = false;
+            const orig = origZh(en);
+            const L = UI.openLayer('dialog', '<h3>改中文名</h3><p>' + esc(en) + (orig ? '\n原来的翻译：' + esc(orig) : '') + '</p>'
+                + '<div class="field"><input type="text" data-zh value="' + esc(t[1] || '') + '" placeholder="' + esc(orig || '写个中文名') + '"></div>'
+                + '<div class="btns">' + (zhEdited(en) ? '<button class="btn" data-reset>恢复原译</button>' : '')
+                + '<button class="btn" data-close>取消</button><button class="btn primary" data-ok>保存</button></div>',
+            { onClose: () => { if (!done) resolve(null); } });
+            const inp = $('[data-zh]', L.box);
+            setTimeout(() => { inp.focus(); inp.select(); }, 50);
+            const finish = async (v) => { done = true; UI.closeLayer(L, true); const r = await setZh(en, v); toast('success', r ? '改成「' + r + '」' : '已恢复'); resolve(r); };
+            $('[data-ok]', L.box).onclick = () => finish(inp.value);
+            inp.onkeydown = (e) => { if (e.key === 'Enter') finish(inp.value); };
+            const rs = $('[data-reset]', L.box);
+            if (rs) rs.onclick = () => finish('');
+        });
     }
 
     const norm = (s) => String(s || '').trim().toLowerCase().replace(/_/g, ' ').replace(/\\([()])/g, '$1').replace(/\s+/g, ' ');
@@ -191,7 +245,7 @@
 
     function rowHtml(t, inPrompt) {
         return '<div class="tg-row' + (inPrompt.has(t[0]) ? ' on' : '') + '" data-t="' + esc(t[0]) + '">'
-            + '<span class="tg-zh">' + (t[1] ? esc(t[1]) : '<i>' + (t[3] === 1 ? '画师' : '—') + '</i>') + '</span>'
+            + '<span class="tg-zh' + (zhEdited(t[0]) ? ' mine' : '') + '">' + (t[1] ? esc(t[1]) : '<i>' + (t[3] === 1 ? '画师' : '—') + '</i>') + '</span>'
             + '<span class="tg-en">' + esc(t[0]) + '</span>'
             + '<span class="tg-n">' + (t[3] && t[3] !== 0 && ui.cat < 0 ? '<em>' + CAT_NAME[t[3]] + '</em>' : '') + fmtCount(t[2]) + '</span></div>';
     }
@@ -209,7 +263,7 @@
 
     function drawFoot(L) {
         const n = promptSet().size;
-        $('.tg-foot span', L.box).textContent = promptBox() ? '点标签加进正面提示词，再点去掉 · 现在有 ' + n + ' 个' : '点标签复制';
+        $('.tg-foot span', L.box).textContent = (promptBox() ? '点标签加进正面提示词，再点去掉 · 现在有 ' + n + ' 个' : '点标签复制') + ' · 长按改中文名';
     }
 
     async function open() {
@@ -242,7 +296,28 @@
         body.addEventListener('scroll', () => {
             if (ui.shown < ui.list.length && body.scrollTop + body.clientHeight > body.scrollHeight - 600) drawMore(L);
         });
-        $('.tg-list', L.box).addEventListener('click', (e) => {
+        // 长按一行：改中文名
+        let lp = 0, lpFired = false, lpX = 0, lpY = 0;
+        const list = $('.tg-list', L.box);
+        list.addEventListener('pointerdown', (e) => {
+            const row = e.target.closest('[data-t]'); if (!row) return;
+            lpFired = false; lpX = e.clientX; lpY = e.clientY;
+            clearTimeout(lp);
+            lp = setTimeout(async () => {
+                lpFired = true;
+                const zh = await editZh(row.dataset.t);
+                if (zh === null) return;
+                const cell = row.querySelector('.tg-zh');
+                const tt = byName.get(row.dataset.t);
+                cell.innerHTML = tt[1] ? esc(tt[1]) : '<i>—</i>';
+                cell.classList.toggle('mine', zhEdited(row.dataset.t));
+            }, 550);
+        });
+        list.addEventListener('pointermove', (e) => { if (Math.hypot(e.clientX - lpX, e.clientY - lpY) > 10) clearTimeout(lp); });
+        ['pointerup', 'pointercancel', 'pointerleave'].forEach((n) => list.addEventListener(n, () => clearTimeout(lp)));
+        list.addEventListener('contextmenu', (e) => { if (e.target.closest('[data-t]')) e.preventDefault(); });
+        list.addEventListener('click', (e) => {
+            if (lpFired) { lpFired = false; return; }
             const row = e.target.closest('[data-t]');
             if (!row) return;
             if (!promptBox()) { UI.copyText(row.dataset.t); return; }
@@ -259,7 +334,8 @@
         + '.tg-sort{display:flex;align-items:center;gap:8px;margin-top:8px;font-size:13px;color:var(--dim)}.tg-sort .seg button{padding:4px 12px;font-size:13px;white-space:nowrap}'
         + '.tg-head,.tg-row{display:flex;gap:10px;align-items:center}'
         + '.tg-head{font-size:12px;padding:8px 4px 6px}.tg-head span{color:var(--faint)}'
-        + '.tg-zh{flex:1 1 0;min-width:0;overflow-wrap:anywhere}.tg-zh i{color:var(--faint);font-style:normal}'
+        + '.tg-zh{flex:1 1 0;min-width:0;overflow-wrap:anywhere}.tg-zh i{color:var(--faint);font-style:normal}.tg-zh.mine{color:var(--accent)}.tg-zh.mine::after{content:" ✎";font-size:11px}'
+        + '.tg-row{-webkit-touch-callout:none;user-select:none;-webkit-user-select:none}'
         + '.tg-en{flex:1.3 1 0;min-width:0;overflow-wrap:anywhere;color:var(--dim)}'
         + '.tg-n{flex:none;width:68px;text-align:right;font-size:12px;color:var(--faint)}.tg-n em{font-style:normal;margin-right:4px;color:var(--dim)}'
         + '.tg-body{padding:0 12px calc(12px + var(--safe-bottom))}'
@@ -296,5 +372,5 @@
     // 启动后空闲时先把数据读进来，第一次写提示词就能用上
     setTimeout(() => load().catch((e) => console.warn(e)), 1500);
 
-    window.TagLib = { load, fix, canon, candidates, open, get loaded() { return !!tags; } };
+    window.TagLib = { load, fix, canon, candidates, open, setZh, editZh, zhEdited, origZh, onZhChange: (fn) => zhListeners.push(fn), get loaded() { return !!tags; } };
 })();

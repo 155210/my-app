@@ -9,7 +9,7 @@
 (function () {
     'use strict';
 
-    let tagMap = null;   // 英文标签 → { zh, cat }，只留角色和作品
+    let tagMap = null;   // 英文标签 → 标签库条目 [英文, 中文, 热度, 类别]，只留角色和作品（中文读条目本身，改了名立刻生效）
     let tagLoading = null;
 
     function loadTags() {
@@ -18,7 +18,7 @@
         if (!tagLoading) {
             tagLoading = TagLib.load().then((tags) => {
                 tagMap = new Map();
-                for (const t of tags) if (t[3] === 4 || t[3] === 3) tagMap.set(t[0], { zh: t[1] || '', cat: t[3] });
+                for (const t of tags) if (t[3] === 4 || t[3] === 3) tagMap.set(t[0], t);
                 return tagMap;
             }).catch(() => { tagLoading = null; return null; });
         }
@@ -60,7 +60,7 @@
             for (const t of tags) {
                 const hit = tm.get(t);
                 if (!hit || covered.has(t)) continue;
-                add({ key: 'tag:' + t, label: hit.zh || t, en: t, kind: hit.cat === 4 ? 'char' : 'work' });
+                add({ key: 'tag:' + t, label: hit[1] || t, en: t, kind: hit[3] === 4 ? 'char' : 'work' });
             }
         }
         return out;
