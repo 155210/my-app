@@ -53,6 +53,12 @@ const fails = []; const ok = (c, m) => { if (!c) fails.push(m); console.log((c ?
     r.pos = fp.positive; r.negTail = fp.negative.slice(-9);
     r.noStyle = Nai.fullPrompts(Object.assign({}, n, { styleId: '' }), { tag: 'cat' }).positive.startsWith('cat, ');
     r.meta = Nai.buildBody(n, { tag: 'cat' }).meta.style;
+    // 描述后缀：接在英文描述后面；没有描述时单独接；V4 不发
+    const ns = Object.assign({}, n, { styles: [Object.assign({}, n.styles[0], { nlSuffix: 'Soft warm light.' })] });
+    r.ns1 = Nai.fullPrompts(ns, { tag: 'cat', nl: 'A cat sits' }).positive;
+    r.ns2 = Nai.fullPrompts(ns, { tag: 'cat' }).positive;
+    r.ns3 = Nai.fullPrompts(Object.assign({}, ns, { model: 'nai-diffusion-4-full' }), { tag: 'cat', nl: 'A cat.' }).positive;
+    r.nsBlank = Params.BLANK_STYLE.nlSuffix === '' && Params.normalize({ nai: { styles: [{ id: 'x' }] } }).nai.styles[0].nlSuffix === '';
     // 模板绑定的质量词 / 负面提示词：填了用模板的，留空跟「NAI 出图」页
     const nb = Object.assign({}, n, { quality: 'global q', styles: [{ id: 's1', name: 'x', prefix: '', quality: 'tpl q', uc: 'tpl uc', suffix: '', negative: 'extra' }] });
     const fb = Nai.fullPrompts(nb, { tag: 'cat', negative: 'dog' });
@@ -79,6 +85,10 @@ const fails = []; const ok = (c, m) => { if (!c) fails.push(m); console.log((c ?
   ok(u.negTail === ', 3d, dog', '负面 = 通用, 模板负面, AI 补的');
   ok(u.noStyle, '不用模板时没有前缀');
   ok(u.meta === '平涂', '配方里记下用的模板名');
+  ok(u.ns1.endsWith('no text. A cat sits. Soft warm light.'), '描述后缀接在英文描述后面：' + u.ns1);
+  ok(u.ns2.endsWith('no text. Soft warm light.'), '没有英文描述时描述后缀单独接上');
+  ok(!u.ns3.includes('Soft warm'), 'V4 不发描述后缀');
+  ok(u.nsBlank, '老模板、空白模板都有描述后缀这一格');
   ok(u.v3, 'V3 请求：不带 v4_prompt、带 sm，用 V3 默认质量词/负面词');
   ok(u.v4, 'V4 请求：带 v4_prompt，不接英文描述');
   ok(u.v5ddim, 'V5 选了 DDIM 自动换成 Euler Ancestral');

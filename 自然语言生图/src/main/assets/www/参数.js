@@ -78,7 +78,7 @@
 
     /** 内置画风模板（来自柏宝绘的默认画师串）；可改可删，删光了就是「不用模板」 */
     // 空白模板：什么都不加，连质量词、负面提示词也不加（不回落到「NAI 出图」页和模型默认）
-    const BLANK_STYLE = { id: 'st_blank', name: '空白（不加任何词）', prefix: '', quality: '', uc: '', suffix: '', negative: '', blank: true };
+    const BLANK_STYLE = { id: 'st_blank', name: '空白（不加任何词）', prefix: '', quality: '', uc: '', suffix: '', nlSuffix: '', negative: '', blank: true };
 
     const DEFAULT_STYLES = [
         {
@@ -86,6 +86,7 @@
             name: '柏宝绘默认画师串',
             prefix: '0.8::nnmbpx::,0.8::artist:yalmyu::,0.1::smilesmile1312,::,  artist:sh_(shinh), 0.4::chen bin::,0.4::dayama::,healthyman,bacheally,',
             suffix: '',
+            nlSuffix: '',
             negative: '',
         },
         BLANK_STYLE,
@@ -109,7 +110,7 @@
             portraitSize: '832×1216',
             landscapeSize: '1216×832',
             artist: '',         // 旧版的画师串，打开时自动搬进画风模板
-            styles: DEFAULT_STYLES, // 画风模板：{ id, name, prefix 前缀, quality 绑定的质量词, uc 绑定的负面提示词, suffix 后缀, negative 额外负面 }
+            styles: DEFAULT_STYLES, // 画风模板：{ id, name, prefix 前缀, quality 绑定的质量词, uc 绑定的负面提示词, suffix 后缀, nlSuffix 接在英文描述后面, negative 额外负面 }
             styleId: 'st_default',  // 当前用的模板，'' = 不用
             quality: '',        // 留空 = 模型默认
             negative: '',       // 留空 = 模型默认
@@ -130,7 +131,7 @@
     function normalize(s) {
         s = s || {};
         const nai = Object.assign({}, DEFAULTS.nai, s.nai);
-        nai.styles = (Array.isArray(nai.styles) ? nai.styles : []).map((x) => Object.assign({ id: '', name: '', prefix: '', quality: '', uc: '', suffix: '', negative: '' }, x));
+        nai.styles = (Array.isArray(nai.styles) ? nai.styles : []).map((x) => Object.assign({ id: '', name: '', prefix: '', quality: '', uc: '', suffix: '', nlSuffix: '', negative: '' }, x));
         // 旧版只有一格画师串：搬成一套模板并选中
         if (String(nai.artist || '').trim()) {
             const id = 'st_' + Date.now().toString(36);

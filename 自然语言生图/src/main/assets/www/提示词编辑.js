@@ -14,7 +14,7 @@
     'use strict';
 
     const { $, esc } = UI;
-    const SEL = ['#c-tag', '#c-neg', '#c-chars textarea[data-f]', 'textarea[data-k$="prefix"]', 'textarea[data-k$="suffix"]',
+    const SEL = ['#c-tag', '#c-neg', '#c-chars textarea[data-f]', 'textarea[data-k$="prefix"]', 'textarea[data-k$="suffix"]', 'textarea[data-k$="nlSuffix"]',
         'textarea[data-k^="nai.styles"][data-k$="quality"]', 'textarea[data-k$=".uc"]', 'textarea[data-k^="nai.styles"][data-k$="negative"]',
         'textarea[data-k="nai.quality"]', 'textarea[data-k="nai.negative"]',
         // 图生图「编辑这张图」、通配符的每一行

@@ -732,6 +732,8 @@
             if (!rest || rest.startsWith('. ')) { nl = rest.slice(2); tag = tag.slice(0, qi).replace(/\s*,\s*$/, ''); }
         }
         tag = cutTail(cutHead(tag, clean(st.prefix)), clean(st.suffix));
+        const ns = String(st.nlSuffix || '').trim();
+        if (ns && nl.endsWith(ns)) nl = nl.slice(0, nl.length - ns.length).trim();
         let neg = cutHead(cutHead(info.negative.trim(), clean(Params.negativeOf(nai))), clean(st.negative));
         const p = info.params;
         return { desc: '', tag, nl, extraNegative: neg, meta: { size: p.width > p.height ? 'landscape' : 'portrait' } };
