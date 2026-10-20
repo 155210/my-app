@@ -1,0 +1,49 @@
+plugins {
+    id 'com.android.application'
+}
+
+// 每次 Actions 构建自动递增版本号
+def runNumber = (System.getenv('GITHUB_RUN_NUMBER') ?: '1').toInteger()
+
+android {
+    namespace 'com.example.nlimage'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.example.nlimage'
+        minSdk 26
+        targetSdk 34
+        versionCode runNumber
+        versionName "1.0.${runNumber}"
+    }
+
+    // 固定签名：新版可直接覆盖安装，设置、图库都保留
+    signingConfigs {
+        fixed {
+            storeFile file('自然语言生图.keystore')
+            storePassword 'shengtu123'
+            keyAlias 'shengtu'
+            keyPassword 'shengtu123'
+        }
+    }
+
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.fixed
+        }
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.fixed
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+        encoding 'UTF-8'
+    }
+}
+
+dependencies {
+    implementation 'androidx.webkit:webkit:1.11.0'
+}
