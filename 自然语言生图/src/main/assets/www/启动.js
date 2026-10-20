@@ -5,7 +5,7 @@
     'use strict';
 
     const { $, $$, toast } = UI;
-    const TITLES = { create: '创作', gallery: '图库' };
+    const TITLES = { create: '创作', batch: '批量', gallery: '图库' };
     let current = 'create';
 
     function showTab(t) {
@@ -14,6 +14,7 @@
         $$('.view').forEach((v) => { v.hidden = v.id !== 'view-' + t; });
         $('#title').textContent = TITLES[t];
         if (t === 'gallery') GalleryPage.refresh();
+        if (t === 'batch') BatchPage.refresh();
     }
     UI.showTab = showTab;
     UI.currentTab = () => current;

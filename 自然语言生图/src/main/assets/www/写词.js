@@ -3,6 +3,10 @@
  *
  * AI 只回一段 JSON：{"tag":"...","nl":"...","negative":"...","size":"portrait|landscape"}
  * 格式不对自动再要（次数在设置里改）。规范在设置里可以改，留空用下面的内置规范（参考「柏宝绘」的 NAI 规范改写）。
+ *
+ * 另外两种写法（照柏宝绘）：
+ *   一段描述拆成多张：run({ plan: 张数（0 = AI 自己定 2~6 张） })，AI 回 {"images":[{desc,tag,nl,negative,size}...]}
+ *   重写提示词：run({ rewrite: { tag, nl, negative, hint 附加要求 } })，照原来那个画面重写一遍，这次的 changes 不要
  */
 (function () {
     'use strict';
@@ -57,6 +61,38 @@
         return Number.isFinite(n) ? Math.min(5, Math.max(0, n)) : 1;
     }
 
+    const PLAN_MAX = 6;
+    /** 拆成多张时附在描述后面的任务说明（规则照柏宝绘的「按剧情节奏规划多张图」） */
+    function planNote(count, nlOn) {
+        const n = Math.max(0, Math.min(PLAN_MAX, Math.floor(Number(count)) || 0));
+        const one = { desc: '这张画什么（一句中文）', tag: '...', nl: nlOn ? '...' : '', negative: '', size: 'portrait' };
+        return '【这次要把上面的描述拆成多张图】\n'
+            + (n ? '一共 ' + n + ' 张，不多不少。' : '张数你自己定，2～' + PLAN_MAX + ' 张，按描述里值得画的画面来，不要为了凑数硬拆。') + '\n'
+            + '- 按描述里事情发生的先后顺序排，每张是一个单一瞬间；相邻两张要有明显不同的动作、表情、场景或状态，不要只是同一刻换个镜头。\n'
+            + '- 同一个角色每张的外貌（发色、发型、瞳色、体型）一字不差；衣服没换就一直写同一套，写具体（颜色、款式、关键部件）。\n'
+            + '- 每张都按上面的规范完整写（人数、外貌、服装、表情视线、动作、场景、景别、光线、色调），不能省略成「同上」。\n'
+            + '- desc 用一句中文说这张画的是哪一刻，给用户看的。\n'
+            + '这次输出的 JSON 改成下面这样（images 里每一项的字段和单张时一样；有 changes 的话照常放在最外层）：\n'
+            + JSON.stringify({ images: [one], changes: [] });
+    }
+
+    /** 重写时附在描述后面：当前提示词当锚点，照同一个画面重写；有附加要求时以要求为准（照柏宝绘 slotPlan + rewriteHint） */
+    function rewriteNote(cur) {
+        cur = cur || {};
+        const hint = String(cur.hint || '').replace(/\r\n?/g, '\n').trim().slice(0, 500);
+        const lines = ['【这次是重写提示词】',
+            '画的还是原来那个画面：不要另选画面、不要换主体。把下面这套提示词重写一遍——依据描述写得更准、更具体，补上漏掉的，修掉和描述不符或含糊的地方。',
+            '', '当前的提示词（要重写的就是它）：', 'tag: ' + (cur.tag || '（空）')];
+        if (cur.nl) lines.push('nl: ' + cur.nl);
+        if (cur.negative) lines.push('negative: ' + cur.negative);
+        lines.push('', '这次不用写 changes。');
+        if (hint) {
+            lines.push('', '【用户对这次重写的额外要求（优先级最高）】', hint,
+                '按这条要求改写。它和上面「不要换画面」等约束冲突时，以这条要求为准；要求没提到的部分照旧保持原来的画面。');
+        }
+        return lines.join('\n');
+    }
+
     function buildMessages(settings, text, extra) {
         const nlOn = settings.nai.naturalLanguage && Params.supportsNl(settings.nai.model);
         let user = text.trim();
@@ -89,10 +125,35 @@
         };
     }
 
+    /** 拆成多张时的回复：{ images: [{ desc, tag, nl, negative, size }] }，一张都解析不出来就抛错 */
+    function parsePlan(text, count) {
+        let t = String(text || '');
+        t = t.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').replace(/```(?:json)?/gi, '');
+        const a = t.indexOf('{'), b = t.lastIndexOf('}');
+        if (a < 0 || b <= a) throw new Error('AI 没有按格式回复 JSON');
+        let j;
+        try { j = JSON.parse(t.slice(a, b + 1)); } catch (e) { throw new Error('AI 回的 JSON 解析不了'); }
+        const list = Array.isArray(j.images) ? j.images : Array.isArray(j) ? j : (j.tag ? [j] : null);
+        if (!list) throw new Error('AI 回复里没有 images 数组');
+        const images = [];
+        list.forEach((im) => {
+            if (!im || typeof im !== 'object') return;
+            try {
+                const r = parseReply(JSON.stringify(im));
+                r.desc = typeof im.desc === 'string' ? im.desc.trim() : '';
+                images.push(r);
+            } catch (e) { /* 缺 tag 的那张跳过 */ }
+        });
+        if (!images.length) throw new Error('AI 规划的图里都没有 tag');
+        const n = Math.floor(Number(count)) || 0;
+        if (n && images.length < n) throw new Error('要 ' + n + ' 张，AI 只给了 ' + images.length + ' 张');
+        return { images: images.slice(0, n || PLAN_MAX) };
+    }
+
     /**
      * 写提示词
-     * opt: { settings, text, signal, onDelta(全文), retries }
-     * 返回 { tag, nl, negative, size, raw }
+     * opt: { settings, text, signal, onDelta(全文), retries, plan, rewrite }
+     * 返回 { tag, nl, negative, size, raw }；拆成多张（opt.plan 不是 undefined/false）时返回 { images: [同上 + desc], raw }
      */
     async function run(opt) {
         const { settings } = opt;
@@ -101,27 +162,34 @@
         if (!String(api.model || '').trim()) throw new Error('请先在设置里选 AI 模型');
         if (!String(opt.text || '').trim()) throw new Error('先写一句中文描述');
         const tries = 1 + (opt.retries == null ? retriesOf(settings) : opt.retries);
+        const planning = opt.plan !== undefined && opt.plan !== false && opt.plan !== null;
+        const nlOn = settings.nai.naturalLanguage && Params.supportsNl(settings.nai.model);
+        const task = planning ? planNote(opt.plan, nlOn) : opt.rewrite ? rewriteNote(opt.rewrite) : '';
         let lastErr = null, hint = '';
         for (let i = 0; i < tries; i++) {
             const r = await Api.chat({
                 api, model: api.model,
-                messages: messagesFor(settings, opt.text, hint, { attempt: i, parseFailed: !!lastErr }),
+                messages: messagesFor(settings, opt.text, [task, hint].filter(Boolean).join('\n\n'), { attempt: i, parseFailed: !!lastErr }),
                 params: { stream: api.stream !== false, temperature: api.temperature },
                 signal: opt.signal,
                 onDelta: (c) => opt.onDelta && opt.onDelta(c),
             });
             let res;
             try {
-                res = Object.assign(parseReply(r.content), { raw: r.content });
+                res = planning ? parsePlan(r.content, opt.plan) : parseReply(r.content);
             } catch (e) {
                 lastErr = e;
                 hint = '（上次你的回复格式不对：' + e.message + '。这次只输出一段 JSON，不要别的内容。）';
                 continue;
             }
-            return filters.reduce((x, fn) => fn(x, settings) || x, res);
+            // 重写不要 changes（建档在第一次写时已经做过，柏宝绘也是丢掉）；多张时 changes 只跟第一张走一次
+            const raw = opt.rewrite ? '' : r.content;
+            const filt = (x, rawOf) => filters.reduce((y, fn) => fn(y, settings) || y, Object.assign(x, { raw: rawOf }));
+            if (planning) return { images: res.images.map((x, k) => Object.assign(filt(x, k ? '' : raw), { raw: k ? '' : r.content })), raw: r.content };
+            return Object.assign(filt(res, raw), { raw: r.content });
         }
         throw new Error(lastErr.message + '（已自动重试）');
     }
 
-    window.Writer = { DEFAULT_SPEC, run, parseReply, buildMessages, messagesFor, retriesOf, addContext, addFilter, addMessages };
+    window.Writer = { DEFAULT_SPEC, PLAN_MAX, run, parseReply, parsePlan, planNote, rewriteNote, buildMessages, messagesFor, retriesOf, addContext, addFilter, addMessages };
 })();

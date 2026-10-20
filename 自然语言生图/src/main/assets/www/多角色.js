@@ -1,7 +1,8 @@
 /*
  * 多角色.js —— 多角色出图（NAI 的 Character Prompts）：每个角色单独的正面 / 负面提示词，可选站位
  *
- * 角色列表存在 characters 键里（跟草稿一样，切走、重开都在）：[{ id, on, tag, negative, pos }]
+ * 角色列表存在 charSlots 键里（跟草稿一样，切走、重开都在）：[{ id, on, tag, negative, pos }]
+ *   （以前存在 characters 键，和角色库撞了，打开时自动搬过来）
  * 出图时用 Nai.addHook 写进 v4_prompt / v4_negative_prompt 的 char_captions（V4 起才有，V3 忽略）。
  * 正面提示词里写场景和人数（2girls 之类），每个角色格子里写这个人的外貌、表情、动作。
  * 出的图在配方里记下 meta.characters；「重绘」「用这套重画」按那张图的角色来。
@@ -9,6 +10,8 @@
  */
 (function () {
     'use strict';
+
+    const KEY = 'charSlots';
 
     const { $, $$, esc, toast } = UI;
     const MAX = 6; // NAI 一次最多 6 个角色
@@ -25,7 +28,7 @@
     let saveTimer = 0;
     function save() {
         clearTimeout(saveTimer);
-        saveTimer = setTimeout(() => Store.set('characters', list), 300);
+        saveTimer = setTimeout(() => Store.set(KEY, list), 300);
     }
 
     const clean = (s) => String(s || '').trim().replace(/^,+|,+$/g, '').trim();
@@ -122,7 +125,14 @@
     }
 
     async function mount() {
-        list = (await Store.get('characters', [])) || [];
+        let saved = await Store.get(KEY, null);
+        // 老版本存在 characters 键里，和角色库撞了同一个键：是数组的就是这里的，搬过来
+        if (!Array.isArray(saved)) {
+            const old = await Store.get('characters', null);
+            saved = Array.isArray(old) ? old : [];
+            if (Array.isArray(old)) Store.set(KEY, old);
+        }
+        list = saved;
         const tagCard = $('#c-tag') && $('#c-tag').closest('.card');
         if (!tagCard) return;
         card = document.createElement('div');
@@ -149,7 +159,12 @@
         const v3 = Params.isV3(UI.settings.nai.model);
         if (v3 !== wasV3) { wasV3 = v3; render(); }
     };
-    CreatePage.reuse = function (item) { set((item.meta || {}).characters); return reuse.apply(this, arguments); };
+    // 图库的图按它的配方换角色；item.characters 给了就用它（批量页是 []）；两个都没有（拆多张的那几张）就不动现在的角色
+    CreatePage.reuse = function (item) {
+        if (item.characters !== undefined) set(item.characters);
+        else if (item.meta) set(item.meta.characters);
+        return reuse.apply(this, arguments);
+    };
 
     window.Characters = { get: () => list, set, snapshot, caption };
 })();
