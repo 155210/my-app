@@ -337,6 +337,8 @@ const fails = []; const ok = (c, m) => { if (!c) fails.push(m); console.log((c ?
   ok(b.input === '1girl, rewritten' && b.parameters.negative_prompt === '', '选空白模板：正面只有标签、负面是空的（不加默认质量词和负面词）');
   ok(await page.evaluate(() => UI.settings.nai.styleId) !== blankId, '编辑页选模板不改创作页的');
   await page.waitForSelector('[data-cmp]', { timeout: 8000 });
+  const newest = await page.evaluate(async () => { const x = (await Gallery.list())[0]; return { desc: x.desc, tag: x.tag, neg: x.extraNegative }; });
+  ok(newest.desc === '同一个女孩在雨里撑伞' && newest.tag === '1girl, rewritten', '编辑出的新图记的是这次的描述和提示词（图库按角色认、搜索才对）：' + JSON.stringify(newest));
   await page.click('.layer:last-child [data-close]');
 
   // 局部重绘：AI 只改涂的那块

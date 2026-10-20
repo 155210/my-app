@@ -642,7 +642,7 @@
             const n = Object.assign({}, nai());
             if (!String(n.key || '').trim()) { toast('warning', '请先在设置里填 NAI 的 Key'); return; }
             const o = ED[mode];
-            const src = { desc: item.desc, tag: item.tag, nl: item.nl, extraNegative: item.extraNegative };
+            let src = { desc: item.desc, tag: item.tag, nl: item.nl, extraNegative: item.extraNegative };
             const name = String(item.desc || item.tag || '').trim().replace(/\s+/g, ' ').slice(0, 16);
             let p, label = KIND_LABEL[mode] + (name ? '：' + name : '');
             if (mode === 'enhance') {
@@ -667,7 +667,9 @@
                     i2i.feather = o.feather;
                     if (String(n.model).includes('nai-diffusion-5-curated')) n.model = 'nai-diffusion-4-5-curated';
                 } else i2i.noise = o.noise;
-                p = { desc: item.desc, tag: st.tag, nl: st.nl, negative: st.negative, size: m.size, characters: m.characters || [], i2i };
+                p = { desc: st.desc, tag: st.tag, nl: st.nl, negative: st.negative, size: m.size, characters: m.characters || [], i2i };
+                // 新图记这次的描述和提示词（不是原图的），图库按角色认、搜索、「用这套重画」才对得上
+                src = { desc: st.desc, tag: st.tag, nl: st.nl, extraNegative: st.negative };
             }
             try { Nai.buildBody(n, p); } catch (err) { toast('error', err.message); return; }
             const show = (res) => { if (L.el.isConnected) window.ImgTools && ImgTools.compare(item, res); };
