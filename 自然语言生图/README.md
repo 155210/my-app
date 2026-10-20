@@ -24,6 +24,7 @@ PR 上也会打包，但只放在 Actions 的附件里，不发 Release。
 ├── 测试/角色系统测试.js        衣柜（穿脱、遮挡）、AI 一句话生成角色、写真模式
 ├── 测试/角色库测试.js          角色库：建档、名字换外貌、AI 自动建档/永久变化、全局角色、撤销
 ├── 测试/自定义提示词测试.js    破限词/规范/思维链、重型提示词（酒馆预设）的测试
+├── 测试/计价测试.js          Anlas 预估（对实测数）、出图按钮上的数字、透明背景、Furry
 ├── 测试/批量测试.js          拆成多张、AI 重写（附要求）、创作页英文描述开关、批量页
 ├── 测试/提示词工具测试.js      联想、调权重、高亮、标签说明、通配符、预设
 ├── 工具/做标签说明.py          生成 依赖/标签说明.json
@@ -44,7 +45,8 @@ PR 上也会打包，但只放在 Actions 的附件里，不发 Release。
         ├── 接口.js               OpenAI 兼容接口：拉模型列表、对话（流式/非流式）（同问答机）
         ├── 参数.js               【出图参数】模型表（V5/V4.5/V4/V3）、默认质量词/负面词、采样器、尺寸预设、默认设置
         ├── 写词.js               【AI 流水线】内置规范、拼消息、解析 JSON、格式不对自动重试；拆成多张（plan）、重写（rewrite）
-        ├── 出图.js               【NAI】拼请求 body、解 zip、测试连接查 Anlas
+        ├── 出图.js               【NAI】拼请求 body、解 zip、测试连接查 Anlas；V5 透明背景、Furry 模式
+        ├── 计价.js               【Anlas 预估】官网同款算法：出图、图生图、精修、放大、图像工具；按钮上的花费标记
         ├── 队列.js               【队列】并发数可调、429 限流自动等待重试、单张/全部取消、失败重试、队列面板、设置页「出图队列」
         ├── 图库.js               【图库数据】存图（可选转 JPG，默认关以保留 NAI 信息）、缩略图、配方、存相册、读图片里的 NAI 信息、图库偏好 galleryPrefs（含排序 sort、文件名规则 nameRule / 计数 nameCounter）、收藏 fav、相册 galleryAlbums（图上只记相册 id，不动文件）
         ├── 工具.js               共用界面小工具（浮层、对话框、列表选择、设置读写）
@@ -109,6 +111,20 @@ PR 上也会打包，但只放在 Actions 的附件里，不发 Release。
 - V3 不发 `v4_prompt`（只读 `input`，带 `sm` 等老字段）；V4 发 `v4_prompt` 但不接英文描述；V5 选了 DDIM 自动换 Euler Ancestral
 - 出完一张 `出图.js` 发 `nai-drawn` 事件（快捷栏据此刷新 Anlas），`Nai.state.lastSeed` 是上一张的种子
 - 请求：`POST {NAI 地址}/ai/generate-image`，返回 zip，取第一张图（有的第三方站直接回 PNG 也认）
+
+## Anlas 预估（计价.js）
+
+算法照官网网页端（社区逆向，同 novelai-python 的 `_cost.py`）：一张 = ceil(2.951823174884865e-6×像素 + 5.753298233447344e-7×像素×步数)，V5 再 ×1.5，有底图 × 强度，最少 2，单张超过 140 官网拒绝。
+Opus（查到订阅才知道，查不到按非 Opus 算并注明）：≤1024×1024、≤28 步免一张；V5 要 Opus 额度没透支。4 倍放大只收 ≤1024×1024 的图，1~4；图像工具按 V3 28 步、图缩放到 1~3 百万像素算，去背景 = 3×价+5 且不免。
+
+- `Cost.estimate(nai, p, 张数)` → `{ total, perImage, once, free, parts, text, over }`；p 里 `size`（横竖）、`width/height`（直接给尺寸）、`img2img`/`image` + `strength`
+- `Cost.image / enhance / upscale / tool` 返回数字（0 免费，-1 超限）；`Cost.label(n)`「免费 / 约 N Anlas」；`Cost.tag(按钮, n 或 estimate, 前缀)` 在按钮上挂小标记
+- `Cost.addExtra(fn)`：`fn(nai, p)` 返回 `{ perImage, once, label }`，参考图、角色参考等注册自己的加价；`Cost.refresh()` 让按钮重算，`Cost.onRefresh(fn)` 订阅
+- 快捷栏.js 给 出图、拆多张的「出这张 / 全部出图」、批量页「开始 / 写好的全部出图」（每张）挂标记；按钮悬停 / 长按看明细
+
+## 透明背景、Furry 模式
+
+快捷栏两个开关（存 `nai.transparent`、`nai.furry`）。透明背景只 V5：质量词前面加 `transparent background`，参数带 `tag_hint_transparent_background`、`straight_alpha`（同官网）；出的 PNG 背景透明，别开图库转 JPG。Furry：正面最前面加 `fur dataset`（V4 起，V3 不加）。配方记 `meta.transparent / furry`。
 
 ## 测试
 
