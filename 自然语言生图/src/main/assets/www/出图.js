@@ -173,6 +173,32 @@
         }
     }
 
+    /** 请求里的图片 / 参考图编码这种大段 base64 换成一句说明（Key 在请求头里，本来就不在 body） */
+    function sanitize(v) {
+        if (typeof v === 'string') return v.length > 1000 && /^[A-Za-z0-9+/=\s]+$/.test(v.slice(0, 2000)) ? '[图片数据已省略，约 ' + Math.round(v.length * 0.75 / 1024) + ' KB]' : v;
+        if (Array.isArray(v)) return v.map(sanitize);
+        if (v && typeof v === 'object') { const o = {}; Object.keys(v).forEach((k) => { o[k] = sanitize(v[k]); }); return o; }
+        return v;
+    }
+
+    /**
+     * 复制用：实际发给 NAI 的正负面提示词（有分角色的话每个角色的也带上），不带参数
+     * meta: 配方（positive / negative，新图还有 request）；body: 刚拼好的请求（预览用），给了就从它取
+     */
+    function promptText(meta, body) {
+        const req = body || (meta && meta.request) || null;
+        const pos = req ? req.input : (meta || {}).positive;
+        const neg = req ? req.parameters.negative_prompt : (meta || {}).negative;
+        let t = '正面提示词：\n' + (pos || '') + '\n\n负面提示词：\n' + (neg || '');
+        const cp = req && req.parameters.v4_prompt ? req.parameters.v4_prompt.caption.char_captions || [] : [];
+        const cn = req && req.parameters.v4_negative_prompt ? req.parameters.v4_negative_prompt.caption.char_captions || [] : [];
+        cp.forEach((c, i) => {
+            t += '\n\n角色 ' + (i + 1) + ' 正面：\n' + c.char_caption;
+            if (cn[i] && String(cn[i].char_caption || '').trim()) t += '\n角色 ' + (i + 1) + ' 负面：\n' + cn[i].char_caption;
+        });
+        return t;
+    }
+
     /**
      * 出一张图
      * 返回 { blob, ext, meta }
@@ -181,6 +207,7 @@
         if (!String(nai.key || '').trim()) throw new Error('请先在设置里填 NAI 的 Key');
         if (!String(p.tag || '').trim()) throw new Error('正面提示词是空的');
         const { body, meta } = buildBody(nai, p);
+        meta.request = sanitize(body); // 实际发出的请求（去掉图片数据），配方里「复制正负面」从这里取分角色提示词
         const r = await fetch(endpoint(nai.url, 'generate-image'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + nai.key.trim() },
@@ -266,5 +293,5 @@
     // lastSeed：最近出的一张的种子（锁定种子用）
     const state = { lastSeed: 0 };
 
-    window.Nai = { generate, test, subscription, usageText, buildBody, fullPrompts, activeStyle, unzipFirstImage, endpoint, addHook, addBodyHook, addTagFilter, state };
+    window.Nai = { sanitize, promptText, generate, test, subscription, usageText, buildBody, fullPrompts, activeStyle, unzipFirstImage, endpoint, addHook, addBodyHook, addTagFilter, state };
 })();
