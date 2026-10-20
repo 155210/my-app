@@ -266,6 +266,16 @@ const tmp = fs.mkdtempSync(path.join(OUT, 'vibe-'));
   const keys = await page.evaluate(() => Store.keys());
   ok(keys.filter((k) => String(k).startsWith('vibe:')).length === 1, '删除参考图连图和编码一起删');
 
+  // 参数预设用的整份导出：关着的角色和互动都能还原
+  ok(await page.evaluate(() => {
+    Characters.set([{ tag: 'a', acts: ['source#hug'] }, { tag: 'b', on: false, acts: ['target#hug'] }]);
+    const out = Characters.exportList();
+    Characters.set([]);
+    Characters.set(out);
+    const c = Characters.get(), a = Characters.getActs();
+    return c.length === 2 && c[1].on === false && a.length === 1 && a[0].a === c[0].id && a[0].b === c[1].id;
+  }), '整份导出再导入：关着的角色、互动都还在');
+
   await browser.close();
   srv.close();
   fs.rmSync(tmp, { recursive: true, force: true });

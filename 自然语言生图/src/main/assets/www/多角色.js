@@ -299,7 +299,7 @@
             const id = 'ch_' + t + i;
             const tagActs = (Array.isArray(c.acts) ? c.acts : []);
             own.push({ id, acts: tagActs });
-            return { id, on: true, tag: c.tag || '', negative: c.negative || '', pos: c.pos || '' };
+            return { id, on: c.on !== false, tag: c.tag || '', negative: c.negative || '', pos: c.pos || '' };
         });
         acts = [];
         const by = {}; // 动作 → { source: [], target: [], mutual: [] }
@@ -333,5 +333,20 @@
         return reuse.apply(this, arguments);
     };
 
-    window.Characters = { get: () => list, getActs: () => acts, set, snapshot: (chars) => snapshot(chars || list, chars ? [] : acts), caption, ACTS };
+    /** 整份角色格子（含关着的、互动摊成 acts），给参数预设存；Characters.set 能原样还原 */
+    function exportList() {
+        return list.map((c) => {
+            const own = [];
+            acts.forEach((x) => {
+                const act = clean(x.act);
+                if (!act || x.a === x.b) return;
+                if (x.mutual) { if (c.id === x.a || c.id === x.b) own.push('mutual#' + act); }
+                else if (c.id === x.a) own.push('source#' + act);
+                else if (c.id === x.b) own.push('target#' + act);
+            });
+            return { on: c.on !== false, tag: c.tag || '', negative: c.negative || '', pos: c.pos || '', acts: own };
+        });
+    }
+
+    window.Characters = { get: () => list, exportList, getActs: () => acts, set, snapshot: (chars) => snapshot(chars || list, chars ? [] : acts), caption, ACTS };
 })();
