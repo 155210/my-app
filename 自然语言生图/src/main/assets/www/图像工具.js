@@ -299,5 +299,19 @@
     ].join('\n');
     document.head.appendChild(css);
 
+    // 帮助 / 首次提示（有 Help 才加）
+    if (window.Help && Help.add) {
+        const G = '图生图与编辑';
+        [
+            { id: 'i2i-base', title: '底图（图生图）', text: '创作页「底图」卡片：从图库选一张，开着时点「出图」就照这张的构图和颜色重画。强度越大越不像底图。', tip: '选一张图当底图，出图就照着它重画', target: '#c-i2i', anlas: '按出图尺寸 × 强度算，有底图时 Opus 也不免费' },
+            { id: 'i2i-edit', title: '编辑（图生图）', text: '大图下面「编辑」：照这张图重画，可以改提示词，强度 0.5～0.7 常用。', target: '[data-q="edit"]', anlas: '按出图尺寸 × 强度算' },
+            { id: 'i2i-infill', title: '局部重绘', text: '编辑页的「局部重绘」：用手指把要重画的地方涂上，没涂的地方保持原样。可以切「擦」、调笔刷大小、撤销、清空。', anlas: '按出图尺寸 × 强度算' },
+            { id: 'i2i-enhance', title: '精修放大', text: '大图下面「精修」：把图放大 1.5 / 2 倍后再细化一遍，画面基本不变。V5 多一个 MAX，服务器直接放到最大。', target: '[data-q="enhance"]', anlas: '按放大后的尺寸 × 强度算；MAX 再 ×1.46，Opus 也扣' },
+            { id: 'i2i-upscale', title: '4 倍放大', text: '大图下面「放大」：NAI 官方放大，只收 1024×1024 像素以内的图，放大 4 倍（超过 4096 就 2 倍）。', target: '[data-q="upscale"]', anlas: true },
+            { id: 'i2i-tools', title: '图像工具', text: '大图下面「工具」：去背景、线稿、草图、上色、换表情（24 种）、去杂物，每行右边是花费。', target: '[data-q="tools"]', anlas: '去背景 = 3 × 价 + 5，Opus 也扣；其他按图大小算' },
+            { id: 'i2i-compare', title: '前后对比', text: '处理完自动打开对比页，左右拖白线看前后区别。处理出的图在大图下面有「对比原图」。' },
+        ].forEach((h) => Help.add(Object.assign({ group: G }, h)));
+    }
+
     window.ImgTools = { upscale, augment, openTools, compare, upScale, upscaleCost, toolCost, TOOLS, MOODS };
 })();
