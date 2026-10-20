@@ -2,7 +2,7 @@
  * 存储.js —— 本地数据（IndexedDB，存在手机里，卸载 App 才会清空）
  *
  * 键：
- *   settings        全部设置（AI 接口、NAI 出图参数、提示词规范）
+ *   settings        全部设置（AI 接口、NAI 出图参数、自定义提示词、重型提示词）
  *   draft           创作页草稿（描述、提示词）
  *   gallery         图库索引（每张图的出图配方 + 缩略图，新的在前）
  *   img:<id>        单张原图（Blob）

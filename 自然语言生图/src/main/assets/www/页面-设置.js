@@ -1,5 +1,5 @@
 /*
- * 页面-设置.js —— 设置页：AI 接口、NAI 出图、提示词规范
+ * 页面-设置.js —— 设置页：AI 接口、NAI 出图（自定义提示词在 自定义提示词.js）
  *
  * 表单项用 data-k="ai.url" 这样的路径直接绑到 UI.settings，改了自动保存。
  */
@@ -83,22 +83,18 @@
             + '<div class="help">留空 = 用模型默认（灰字就是默认值）。AI 补的负面词会接在后面。<a href="#" data-act="reset-n">恢复默认</a></div></div>';
     }
 
-    function tabSpec() {
-        return '<div class="field"><label>AI 写提示词的规范</label><textarea class="ta big" data-k="prompts.system"></textarea>'
-            + '<div class="help">告诉 AI 怎么把中文写成 NAI 提示词。留空 = 用内置规范。改的时候要保留「只输出 JSON」那段格式要求，不然程序读不了。</div></div>'
-            + '<div class="btns"><button class="btn" data-act="fill-spec">把内置规范填进来改</button><button class="btn danger" data-act="reset-spec">恢复内置</button></div>';
-    }
-
     // 标签页表：以后的功能（备份、更新、角色库…）用 SettingsPage.addTab 加自己的页，不用改这里
     const TABS = [
         { id: 'ai', label: 'AI 接口', html: tabAi },
         { id: 'nai', label: 'NAI 出图', html: tabNai },
-        { id: 'spec', label: '提示词规范', html: tabSpec },
+        { id: 'spec', label: '自定义提示词', html: () => '' }, // 内容在 自定义提示词.js（addTab 同 id 替换）
     ];
     const extraActs = {};
-    /** t: { id, label, html() 返回表单 HTML（data-k 自动绑定）, acts: { 名字: async (按钮, 重画) => {} } } */
+    /** t: { id, label, html() 返回表单 HTML（data-k 自动绑定）, acts: { 名字: async (按钮, 重画) => {} }, after: 放在哪个标签后面 }；id 已有就原地替换 */
     function addTab(t) {
-        TABS.push(t);
+        const i = TABS.findIndex((x) => x.id === t.id);
+        const at = TABS.findIndex((x) => x.id === t.after);
+        if (i >= 0) TABS[i] = t; else if (at >= 0) TABS.splice(at + 1, 0, t); else TABS.push(t);
         Object.assign(extraActs, t.acts || {});
     }
 
@@ -155,10 +151,6 @@
             set('nai.seed', Nai.state.lastSeed); render(L);
         } else if (a === 'seed-random') { set('nai.seed', 1 + Math.floor(Math.random() * (2 ** 32 - 1))); render(L); }
         else if (a === 'styles') { tab = 'style'; render(L); }
-        else if (a === 'fill-spec') { set('prompts.system', Writer.DEFAULT_SPEC); render(L); }
-        else if (a === 'reset-spec') {
-            if (await UI.confirmBox('恢复内置规范？', '你改过的规范会被清掉。', '恢复', true)) { set('prompts.system', ''); render(L); }
-        }
     }
 
     function open(which) {
