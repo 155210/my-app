@@ -43,6 +43,8 @@ PR 上也会打包，但只放在 Actions 的附件里，不发 Release。
         ├── 工具.js               共用界面小工具（浮层、对话框、列表选择、设置读写）
         ├── 页面-设置.js          设置页（AI 接口 / NAI 出图 / 提示词规范）
         ├── 风格.js               画风模板（前缀/后缀/负面，多套）：设置页的「画风模板」标签页
+        ├── 多角色.js             【多角色】创作页「多角色」卡片：每个角色单独正面/负面、站位，进 char_captions（V4 起）
+        ├── 参考图.js             【画风参考】创作页「画风参考图」卡片：Vibe 强度、信息提取量，自动编码，导入导出 .naiv4vibe
         ├── 快捷栏.js             创作页的模型/画风/尺寸/锁种子快捷栏（包一层 CreatePage，不改创作页文件）+ 顶栏 Anlas 余额
         ├── 页面-创作.js          创作页
         ├── 页面-图库.js          图库页（四档大小、长按菜单）、大图（左右滑、双指/双击缩放、长按保存、上滑配方）、完整配方、读取图片信息
@@ -57,7 +59,7 @@ PR 上也会打包，但只放在 Actions 的附件里，不发 Release。
 ### 扩展口（新功能尽量加新文件，少改现有文件）
 
 - `Nai.addTagFilter(fn)`：`fn(画面标签串, nai设置, 本次提示词)` 返回新的标签串，拼正面之前执行（预览、配方里看到的也是改过的）。角色库用它把名字换成外貌。
-- `Nai.addHook(fn)`：`fn(parameters, nai设置, 本次提示词)`，出图请求发出前改参数。多角色、Vibe 用它。
+- `Nai.addHook(fn)`：`fn(parameters, nai设置, 本次提示词, extra)`，出图请求发出前改参数，往 `extra` 里放的会记进配方。多角色、Vibe、角色库用它。
 - `Writer.addContext(fn)`：`fn(设置, 中文描述)` 返回一段参考文字，附在发给 AI 的消息后面。角色库、标签库候选用它。
 - `Writer.addFilter(fn)`：`fn(结果, 设置)` 返回改过的结果（`{tag, nl, negative, size}`），AI 回复解析成功后依次执行。标签库纠错用它。
 - `TagLib`：`load()` 读数据，`fix(标签串)` 纠正写法，`canon(一个标签)`，`candidates(中文)` 找候选，`open()` 打开标签库页面。
@@ -65,6 +67,12 @@ PR 上也会打包，但只放在 Actions 的附件里，不发 Release。
 - 新设置字段加在 `参数.js` 的 `DEFAULTS` 里，老用户打开时自动补上。
 - 队列的设置（`nai.concurrency`、`nai.retry429`、`nai.maxRetries`）没进 `DEFAULTS`，默认值在 `队列.js` 的 `CFG_DEFAULTS`。
 - `Queue.add(fn, { label, retry })`：排一张进队列；`label` 显示在队列面板，`retry` 是失败后点「重试」时调的函数。
+
+## 多角色和画风参考图
+
+- 角色列表存在 `characters` 键（像草稿一样跟着创作页走）：`[{ id, on, tag, negative, pos }]`，最多 6 个。出图时写进 `v4_prompt` / `v4_negative_prompt` 的 `char_captions`，另发一份 `characterPrompts`；1girl/1boy 换成 girl/boy；选了站位就开 `use_coords`。V3 忽略。配方记 `meta.characters`，「重绘」「用这套重画」按那张图的角色来。角色库的 `Nai.addHook` 会把角色格子里整项是角色名的换成外貌。
+- 参考图索引在 `nai.vibes`（`{ id, name, on, strength, info }`），图和编码在 `vibe:<id>`（`{ image, thumb, enc: [{ key, info, data }] }`，进备份）。V4 起出图前（包了一层 `Nai.generate`）缺哪个模型 / 信息提取量的编码就调 `/ai/encode-vibe` 补上（官方每次扣 2 Anlas，同一张排了几张只编一次），放进 `reference_image_multiple_cached`；V3 直接发原图。配方记 `meta.vibes`。
+- `Nai.addHook(fn)` 的 `fn` 有第 4 个参数 `extra`：往里放的东西合进这张图的 `meta`。
 
 ## 图片里的出图信息
 
@@ -88,6 +96,8 @@ PW=/opt/node-tools/node_modules/playwright CHROME=/opt/pw-browsers/chromium-1194
 （`测试/队列测试.js` 同样的跑法。）
 
 起本地静态服务、拦截假 AI 和假 NAI 接口，走一遍：设置 → 拉模型 → 写提示词（第一次故意回错格式，测自动重试）→ 自动出图 → 图库（读 PNG 文本 / 隐写里的 NAI 信息、PNG 转 JPG、四档大小、长按菜单、大图滑动/缩放/长按、完整配方、删除）→ 重开页面数据还在 → 返回键。
+
+`测试/多角色测试.js`：角色进 char_captions、站位、重绘按原角色、V3 忽略；参考图编码（只编一次、改提取量重编）、强度、V3 发原图、导出导入 .naiv4vibe、重开还在、删除连数据删。
 
 `测试/出图参数测试.js`（同样的运行方式）：V3/V4/V5 请求结构、尺寸预设和自定义、画风模板（新建、切换、旧画师串迁移）、快捷栏、锁定种子、Anlas 自动刷新。
 

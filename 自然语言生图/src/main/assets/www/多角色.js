@@ -78,7 +78,7 @@
                 + '<div class="row"><label class="check grow" style="margin:0"><span class="switch"><input type="checkbox" data-f="on"' + (c.on !== false ? ' checked' : '') + '><span></span></span><span>角色 ' + (i + 1) + '</span></label>'
                 + '<select data-f="pos" style="width:auto;padding:6px 4px">' + POS.map((x) => '<option value="' + x.value + '"' + (x.value === (c.pos || '') ? ' selected' : '') + '>' + x.label + '</option>').join('') + '</select>'
                 + '<button class="btn small danger" data-a="del">删除</button></div>'
-                + '<div class="field"><textarea class="ta small" data-f="tag" placeholder="这个角色的英文标签，如 girl, long black hair, blue eyes, white dress, smile">' + esc(c.tag) + '</textarea></div>'
+                + '<div class="field"><textarea class="ta small" data-f="tag" placeholder="这个角色的英文标签，如 girl, long black hair, blue eyes, smile；角色库里的名字也行">' + esc(c.tag) + '</textarea></div>'
                 + '<div class="field" style="margin-bottom:0"><textarea class="ta small" data-f="negative" placeholder="这个角色不想要的（可留空）">' + esc(c.negative) + '</textarea></div>'
                 + '</div>').join('');
     }
