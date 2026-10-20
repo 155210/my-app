@@ -74,6 +74,13 @@
         tagCard.parentNode.insertBefore(card, tagCard);
         $('#c-size').addEventListener('click', () => setTimeout(render)); // 换横竖后尺寸那格跟着换
         $('#c-count').addEventListener('change', () => setTimeout(costs));
+        // 手机上没有悬停提示：长按出图按钮弹出花费明细（长按后不再出图）
+        const draw = $('#c-draw');
+        let press = 0, pressed = false;
+        draw.addEventListener('touchstart', () => { pressed = false; press = setTimeout(() => { pressed = true; toast('info', draw.title || '', '预计花费'); }, 500); }, { passive: true });
+        ['touchend', 'touchmove', 'touchcancel'].forEach((ev) => draw.addEventListener(ev, () => clearTimeout(press), { passive: true }));
+        draw.addEventListener('click', (e) => { if (pressed) { pressed = false; e.stopImmediatePropagation(); e.preventDefault(); } }, true);
+        draw.addEventListener('contextmenu', (e) => e.preventDefault());
         $('#c-size').addEventListener('click', () => setTimeout(costs));
         // 拆多张的结果卡片、批量页是各自重画的，按钮一变就补上标记
         let t = 0;

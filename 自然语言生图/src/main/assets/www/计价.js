@@ -11,7 +11,7 @@
  * 图像工具：图先缩放到 1~3 百万像素之间，按 V3 28 步算；去背景 = 3 × 价 + 5，Opus 也不免。
  *
  * 用法：
- *   Cost.estimate(nai, p, 张数) → { total, perImage, once, free, parts:[{label, anlas}], text, over }
+ *   Cost.estimate(nai, p, 张数) → { total, perImage, once, free, parts:[{label, anlas}], text, over, count, quota 约用掉的 V5 Opus 额度% }
  *   Cost.image({ width, height, steps, model, strength }, { opus, usageEmpty }) → 一张的数字
  *   Cost.enhance / Cost.upscale / Cost.tool → 数字；Cost.label(数字) → 「免费」「约 20 Anlas」
  *   Cost.tag(按钮, 数字或 estimate 的结果, 前缀) → 在按钮里挂个小标记
@@ -130,8 +130,19 @@
         }
         const total = perImage * count + once;
         let text = over ? '单张超过 140 Anlas，官网会拒绝' : label(total);
+        // 每张都是单独一个请求（n_samples = 1），所以 Opus 下几张都免费；V5 每张约用掉 1/17.3% 的 Opus 额度
+        let quota = 0;
+        if (free) {
+            if (count > 1) text = '免费 ×' + count + '（每张单独发，Opus 张张免费）';
+            if (Params.isV5(nai.model)) {
+                quota = Math.round(count / 17.3 * 10) / 10;
+                text += '，约用掉 Opus 额度 ' + (quota < 0.1 ? '不到 0.1' : quota) + '%';
+                const left = account && account.usage ? account.usage.percent : null;
+                if (left != null && quota > left) text += '；额度只剩 ' + left + '%，超出的那几张会扣 Anlas';
+            }
+        }
         if (!a.known && !over) text += '（按非 Opus 算）';
-        return { total, perImage, once, free: total === 0 && !over, parts, text, over, opus: a.opus, known: a.known };
+        return { total, perImage, once, free: total === 0 && !over, parts, text, over, opus: a.opus, known: a.known, count, quota };
     }
 
     /** 「免费」「约 20 Anlas」 */
@@ -149,7 +160,8 @@
         if (!s) { s = document.createElement('span'); s.className = 'cost-tag'; btn.appendChild(s); }
         const total = typeof n === 'object' ? n.total : n;
         const over = typeof n === 'object' ? n.over : n < 0;
-        const text = over ? '超限' : total === 0 ? '免费' : (prefix ? prefix + ' ' : '') + total + ' Anlas';
+        const many = typeof n === 'object' && n.count > 1 ? ' ×' + n.count : '';
+        const text = over ? '超限' : total === 0 ? '免费' + many : (prefix ? prefix + ' ' : '') + total + ' Anlas';
         if (s.textContent !== text) s.textContent = text; // 没变就不动 DOM，免得观察 DOM 的地方来回触发
         s.classList.toggle('free', !over && total === 0);
         btn.title = typeof n === 'object'
