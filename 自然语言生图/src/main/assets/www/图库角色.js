@@ -97,6 +97,21 @@
         await zhReady;
         const map = new Map();
         for (const it of items) map.set(it.id, detect(it, lib, tm));
+        // 手动放进 / 移出的（图库里长按「放到人物标签」）：名字跟着自动认出的同一个标签走，改了中文名也跟着变
+        const labelOf = new Map();
+        for (const list of map.values()) for (const x of list) labelOf.set(x.key, x);
+        for (const it of items) {
+            if (!it.charsOn && !it.charsOff) continue;
+            const off = new Set(it.charsOff || []);
+            const list = map.get(it.id).filter((x) => !off.has(x.key));
+            for (const c of it.charsOn || []) {
+                if (list.some((x) => x.key === c.key)) continue;
+                const same = labelOf.get(c.key);
+                const lc = same || (c.key.startsWith('lib:') && lib.find((y) => 'lib:' + y.id === c.key));
+                list.push(Object.assign({}, c, same ? { label: same.label, zh: same.zh } : lc ? { label: lc.name, zh: true } : { label: (c.key.startsWith('tag:') && zhOf(c.en)) || c.label, zh: !c.key.startsWith('tag:') || !!zhOf(c.en) }, { manual: true }));
+            }
+            map.set(it.id, list);
+        }
         return map;
     }
 

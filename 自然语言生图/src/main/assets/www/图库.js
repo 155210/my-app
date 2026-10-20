@@ -1,7 +1,7 @@
 /*
  * 图库.js —— 图库数据：每张图的原图（Blob）和出图配方
  *
- *   gallery       索引数组（新的在前）：{ id, time, ext, bytes, origExt, thumb, desc, tag, nl, extraNegative, meta,
+ *   gallery       索引数组（新的在前；charsOn / charsOff 是手动放进 / 移出的人物标签）：{ id, time, ext, bytes, origExt, thumb, desc, tag, nl, extraNegative, meta,
  *                 fav 收藏, albums 所在相册 id 数组, imported 外部导入, name 导入时的原文件名 }
  *   galleryAlbums 相册（只是分组，不移动文件；一张图可以在多个相册里）：[{ id, name }]
  *   img:<id>      原图 Blob
@@ -293,6 +293,13 @@
                 const a = new Set(x.albums || []);
                 if (patch.on) a.add(patch.album); else a.delete(patch.album);
                 if (a.size) x.albums = [...a]; else delete x.albums;
+            }
+            // 手动放进 / 移出人物标签：charsOn 自己加的 [{ key, label, en, kind }]，charsOff 自动认出来但不要的 key
+            if (patch.char) {
+                const c = patch.char, on = (x.charsOn || []).filter((y) => y.key !== c.key), off = new Set(x.charsOff || []);
+                if (patch.on) { on.push({ key: c.key, label: c.label, en: c.en || '', kind: c.kind || 'char' }); off.delete(c.key); } else off.add(c.key);
+                if (on.length) x.charsOn = on; else delete x.charsOn;
+                if (off.size) x.charsOff = [...off]; else delete x.charsOff;
             }
         }
         await Store.set('gallery', items);

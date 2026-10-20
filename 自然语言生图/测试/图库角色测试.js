@@ -191,6 +191,57 @@ const fails = []; const ok = (c, m) => { if (!c) fails.push(m); console.log((c ?
   ok(true, '在列表里点一个 → 只看这个人物');
   await page.screenshot({ path: OUT + '/人物列表.png' });
 
+  // ---------- 手动把图放进 / 移出人物标签 ----------
+  await page.click('#g-chips button[data-key=""]');
+  await page.waitForFunction(() => document.querySelectorAll('.thumb').length === 6);
+  const landId = await page.evaluate(async () => (await Gallery.list()).find((x) => x.desc === '风景').id);
+  const lp = async (sel) => { const b = await (await page.$(sel)).boundingBox(); await page.mouse.move(b.x + 10, b.y + 10); await page.mouse.down(); await page.waitForTimeout(650); await page.mouse.up(); };
+  await lp('.thumb[data-id="' + landId + '"]');
+  await page.click('.sheet .menu-item[data-k="chars"]');
+  await page.waitForSelector('.g-cp-body [data-key]');
+  ok(!(await page.$('.g-cp-body button.on')), '「风景」原来没有人物标签，列表里都不亮');
+  await page.click('.g-cp-body [data-key="tag:hatsune miku"]');
+  await page.waitForSelector('.g-cp-body button.on[data-key="tag:hatsune miku"]');
+  ok(true, '点「初音未来」→ 这张放进去，按钮亮了');
+  // 新起一个人物标签
+  await page.click('.sheet [data-new]');
+  await page.fill('.dialog [data-v]', '我的原创');
+  await page.click('.dialog [data-ok]');
+  await page.waitForSelector('.g-cp-body button.on[data-key="me:我的原创"]');
+  ok(true, '新的人物标签也能起');
+  await page.click('.sheet [data-close]');
+  await page.waitForFunction(() => [...document.querySelectorAll('#g-chips button')].some((b) => b.textContent === '我的原创1'));
+  const miku = await page.$eval('#g-chips button[data-key="tag:hatsune miku"]', (b) => b.textContent);
+  ok(miku.endsWith('3'), '筛选条上「初音未来」多了一张：' + miku);
+  ok(await page.evaluate(async (id) => (await Gallery.list()).length === 6 && !!(await Gallery.getBlob(id)), landId), '图没有被移动或复制');
+  // 多选：移出当前筛选的标签
+  await page.click('#g-chips button[data-key="tag:hatsune miku"]');
+  await page.waitForFunction(() => document.querySelectorAll('.thumb').length === 3);
+  await page.click('#g-sel');
+  await page.click('.thumb[data-id="' + landId + '"]');
+  await page.click('#g-sel-more');
+  await page.click('.sheet .menu-item[data-k="charOut"]');
+  await page.waitForFunction(() => document.querySelectorAll('.thumb').length === 2);
+  ok(true, '多选后「移出「初音未来」」，这张从这个标签里拿走');
+  // 自动认出来的也能移出：多选两张放进「我的原创」
+  await page.click('#g-chips button[data-key="me:我的原创"]');
+  await page.waitForFunction(() => document.querySelectorAll('.thumb').length === 1);
+  await page.click('#g-chips button[data-key=""]');
+  await page.waitForFunction(() => document.querySelectorAll('.thumb').length === 6);
+  await page.click('#g-sel');
+  await page.click('.thumb:nth-child(1)'); await page.click('.thumb:nth-child(2)');
+  await page.click('#g-sel-more');
+  await page.click('.sheet .menu-item[data-k="chars"]');
+  await page.click('.g-cp-body [data-key="me:我的原创"]');
+  await page.waitForFunction(() => [...document.querySelectorAll('#g-chips button')].some((b) => b.textContent === '我的原创3'), null, { timeout: 4000 }).catch(() => {});
+  ok(await page.evaluate(() => [...document.querySelectorAll('#g-chips button')].some((b) => b.textContent === '我的原创3')), '多选两张一起放进标签');
+  // 重开后还在
+  await page.reload();
+  await page.waitForSelector('#c-tag');
+  await page.click('#tabbar [data-tab="gallery"]');
+  await page.waitForFunction(() => [...document.querySelectorAll('#g-chips button')].some((b) => b.textContent === '我的原创3'), null, { timeout: 5000 }).catch(() => {});
+  ok(await page.evaluate(() => [...document.querySelectorAll('#g-chips button')].some((b) => b.textContent === '我的原创3')), '重开后手动放的标签还在');
+
   await browser.close(); srv.close();
   console.log(fails.length ? '\n失败 ' + fails.length + ' 项：\n' + fails.join('\n') : '\n全部通过');
   process.exit(fails.length ? 1 : 0);

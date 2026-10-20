@@ -10,6 +10,7 @@
     const root = () => $('#view-gallery');
     const ICON_MORE = '<svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></svg>';
     const ICON_SEL = '<svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 12l3 3 5-6"/></svg>';
+    const ICON_TAG = '<svg viewBox="0 0 24 24"><path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8.5" r="1.5"/></svg>';
     const ICON_STAR = '<svg viewBox="0 0 24 24"><path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z"/></svg>';
     const ICON_ALBUM = '<svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>';
     const ICON_READ = '<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h10M7 13h6"/></svg>';
@@ -61,6 +62,7 @@
     // ------------------------------------------------------------
     let gridUrls = [];
     let sel = null;        // 多选模式：选中的 id 集合；null = 没在多选
+    let lastFound = new Map(), lastChips = []; // 上次刷新认出的人物（「放到人物标签」用）
     const filt = { q: '', key: '', view: '' }; // 搜索词、选中的角色 / 作品（GalleryChars 的 key）、看哪组：'' 全部 / 'fav' 收藏 / 相册 id
     let shownIds = null;   // 筛选后网格里的图（null = 没筛选），大图左右滑只在这些里换
     let qTimer = 0;
@@ -87,6 +89,7 @@
         const inView = (x) => !filt.view || (filt.view === 'fav' ? x.fav : (x.albums || []).includes(filt.view));
         const found = window.GalleryChars ? await GalleryChars.index(all) : new Map();
         const chipList = window.GalleryChars ? GalleryChars.chips(found) : [];
+        lastFound = found; lastChips = chipList;
         if (filt.key && !chipList.some((c) => c.key === filt.key)) filt.key = '';
         const filtering = !!(filt.q.trim() || filt.key || filt.view);
         items = Gallery.sorted(all, p.sort).filter((x) => inView(x) && (!filt.key || (found.get(x.id) || []).some((c) => c.key === filt.key))
@@ -219,6 +222,60 @@
         done();
     }
 
+    /**
+     * 「放到人物标签」：选一个已有的人物 / 作品（或角色库里的角色、新起一个名字），把这几张图放进去。
+     * 只有一张图时，已经在的标签标亮，点一下就移出。改了返回 true
+     */
+    function pickChars(ids) {
+        return new Promise((resolve) => {
+            let q = '', changed = false;
+            const one = ids.length === 1;
+            const all = lastChips.slice();
+            if (window.CharLib) for (const c of CharLib.list || []) if (!all.some((x) => x.key === 'lib:' + c.id)) all.push({ key: 'lib:' + c.id, label: c.name, kind: 'char', n: 0 });
+            const L = UI.openLayer('sheet', '<div class="grip"></div><h3>' + (one ? '这张图的人物标签' : '把 ' + ids.length + ' 张放到人物标签') + '</h3>'
+                + '<div class="card-sub" style="margin:-6px 0 8px">' + (one ? '亮着的是这张图现在有的，点一下放进 / 移出。' : '点一个，选中的图都放进去。') + '不会移动或复制图片。</div>'
+                + '<input type="search" class="g-cp-q" placeholder="搜名字（中文英文都行）">'
+                + '<div class="g-cp-body"></div>'
+                + '<div class="btns"><button class="btn" data-new>＋ 新的人物标签</button><button class="btn primary" data-close>好</button></div>',
+            { onClose: () => resolve(changed) });
+            const body = $('.g-cp-body', L.box);
+            const has = (key) => one && (lastFound.get(ids[0]) || []).some((x) => x.key === key);
+            const draw = () => {
+                const k = q.trim().toLowerCase();
+                const hit = all.filter((c) => !k || (c.label + ' ' + (c.en || '')).toLowerCase().includes(k));
+                const group = (kind, title) => {
+                    const g = hit.filter((c) => c.kind === kind);
+                    return g.length ? '<div class="section-title">' + title + '</div><div class="g-chips wrap">' + g.map((c) => chipHtml(c, has(c.key))).join('') + '</div>' : '';
+                };
+                body.innerHTML = hit.length ? group('char', '人物') + group('work', '作品') : '<div class="empty">没有符合的，点下面「新的人物标签」起一个</div>';
+            };
+            const put = async (c, on) => {
+                await Gallery.mark(ids, { char: c, on });
+                changed = true;
+                lastFound = await GalleryChars.index(await Gallery.list());
+                toast('success', (on ? '放进「' : '移出「') + c.label + '」' + (one ? '' : ' ' + ids.length + ' 张'));
+            };
+            draw();
+            $('.g-cp-q', L.box).oninput = (e) => { q = e.target.value; draw(); };
+            body.addEventListener('click', async (e) => {
+                const b = e.target.closest('[data-key]'); if (!b) return;
+                const c = all.find((x) => x.key === b.dataset.key);
+                if (!c) return;
+                const on = !has(c.key);
+                await put(c, on);
+                if (one) draw(); else UI.closeLayer(L);
+            });
+            $('[data-new]', L.box).onclick = async () => {
+                const name = await ask('新的人物标签', q.trim(), '比如：小雪、自创角色 A', '放进去');
+                if (!name) return;
+                const c = all.find((x) => x.label === name) || { key: 'me:' + name, label: name, kind: 'char', n: 0 };
+                if (!all.includes(c)) all.unshift(c);
+                await put(c, true);
+                if (one) draw(); else UI.closeLayer(L);
+            };
+        });
+    }
+
     function openChipPanel(list) {
         let q = '';
         const L = UI.openLayer('sheet', '<div class="grip"></div><h3>人物和作品</h3>'
@@ -308,7 +365,9 @@
                 { k: 'fav', label: '收藏', icon: ICON_STAR },
                 { k: 'unfav', label: '取消收藏', icon: ICON_STAR },
                 { k: 'album', label: '加进相册…', icon: ICON_ALBUM },
-            ].concat(inAlbum ? [{ k: 'out', label: '移出这个相册', icon: ICON_ALBUM }] : []));
+                { k: 'chars', label: '放到人物标签…', icon: ICON_TAG },
+            ].concat(inAlbum ? [{ k: 'out', label: '移出这个相册', icon: ICON_ALBUM }] : [])
+                .concat(filt.key ? [{ k: 'charOut', label: '移出「' + ((lastChips.find((c) => c.key === filt.key) || {}).label || '这个标签') + '」', icon: ICON_TAG }] : []));
             if (k === 'fav' || k === 'unfav') { await Gallery.mark(ids, { fav: k === 'fav' }); toast('success', k === 'fav' ? '收藏了 ' + ids.length + ' 张' : '取消收藏 ' + ids.length + ' 张'); }
             else if (k === 'album') {
                 const a = await pickAlbum();
@@ -316,7 +375,12 @@
                 await Gallery.mark(ids, { album: a.id, on: true });
                 toast('success', '放进「' + a.name + '」' + ids.length + ' 张');
             } else if (k === 'out') { await Gallery.mark(ids, { album: filt.view, on: false }); toast('success', '移出了 ' + ids.length + ' 张（图还在）'); }
-            else return;
+            else if (k === 'chars') { if (!await pickChars(ids)) return; }
+            else if (k === 'charOut') {
+                const c = lastChips.find((x) => x.key === filt.key) || { key: filt.key };
+                await Gallery.mark(ids, { char: c, on: false });
+                toast('success', '从「' + (c.label || '这个标签') + '」移出了 ' + ids.length + ' 张（图还在）');
+            } else return;
             endSelect();
         };
         $('#g-sel-save', r).onclick = async (e) => {
@@ -355,6 +419,7 @@
             { k: 'save', label: '保存到手机', icon: UI.ICON.save },
             { k: 'fav', label: item.fav ? '取消收藏' : '收藏', icon: ICON_STAR },
             { k: 'album', label: '加进相册…', icon: ICON_ALBUM },
+            { k: 'chars', label: '人物标签…', icon: ICON_TAG },
             { k: 'recipe', label: '看配方', icon: ICON_INFO },
             { k: 'read', label: '读图片里藏的信息', icon: ICON_READ },
             { k: 'copy', label: '复制正面', icon: UI.ICON.copy },
@@ -367,6 +432,7 @@
             const a = await pickAlbum(item);
             if (a) { await Gallery.mark([item.id], { album: a.id, on: true }); toast('success', '放进「' + a.name + '」'); refresh(); }
         }
+        if (k === 'chars' && await pickChars([item.id])) refresh();
         if (k === 'save') save(item);
         if (k === 'recipe') openRecipe(item);
         if (k === 'read') readItem(item);
@@ -914,7 +980,9 @@
                 { k: 'copy', label: '复制正面', icon: UI.ICON.copy },
                 { k: 'recipe', label: '看配方', icon: ICON_INFO },
                 { k: 'read', label: '读图片里藏的信息', icon: ICON_READ },
+                { k: 'chars', label: '人物标签…', icon: ICON_TAG },
             ]);
+            if (k === 'chars' && await pickChars([cur().id])) refresh();
             if (k === 'save') save(cur());
             if (k === 'copy') UI.copyText((cur().meta || {}).positive || cur().tag);
             if (k === 'recipe') openRecipe(cur(), close);
