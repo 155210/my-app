@@ -1,0 +1,131 @@
+// 网页层无头浏览器测试：假 AI 接口 + 假 NAI（回 zip），走一遍 设置 → 写提示词 → 出图 → 图库
+// 运行：PW=/opt/node-tools/node_modules/playwright CHROME=/opt/pw-browsers/chromium-1194/chrome-linux/chrome node 自然语言生图/测试/网页测试.js
+const { chromium } = require(process.env.PW || 'playwright');
+const http = require('http'), fs = require('fs'), path = require('path'), zlib = require('zlib');
+const ROOT = path.join(__dirname, '..', 'src', 'main', 'assets', 'www');
+const OUT = process.env.OUT || require('os').tmpdir();
+
+// 本地静态服务
+const srv = http.createServer((q, s) => {
+  const f = path.join(ROOT, decodeURIComponent(q.url.split('?')[0]));
+  if (!fs.existsSync(f)) { s.writeHead(404); return s.end(); }
+  const ext = path.extname(f);
+  s.writeHead(200, { 'Content-Type': { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' }[ext] || 'application/octet-stream' });
+  fs.createReadStream(f).pipe(s);
+}).listen(0);
+
+// 造一张 64x96 的 PNG（纯色）
+function crc32(buf) { let c, t = []; for (let n = 0; n < 256; n++) { c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } c = 0xffffffff; for (const b of buf) c = t[(c ^ b) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; }
+function chunk(type, data) { const l = Buffer.alloc(4); l.writeUInt32BE(data.length); const td = Buffer.concat([Buffer.from(type), data]); const c = Buffer.alloc(4); c.writeUInt32BE(crc32(td)); return Buffer.concat([l, td, c]); }
+function png(w, h) { const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 2; const raw = Buffer.alloc((w * 3 + 1) * h); for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const o = y * (w * 3 + 1) + 1 + x * 3; raw[o] = 200; raw[o + 1] = 120; raw[o + 2] = 60; } return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]); }
+function zip(name, data, method) {
+  const comp = method === 8 ? zlib.deflateRawSync(data) : data;
+  const nm = Buffer.from(name), crc = crc32(data);
+  const lh = Buffer.alloc(30); lh.writeUInt32LE(0x04034b50, 0); lh.writeUInt16LE(20, 4); lh.writeUInt16LE(method, 8); lh.writeUInt32LE(crc, 14); lh.writeUInt32LE(comp.length, 18); lh.writeUInt32LE(data.length, 22); lh.writeUInt16LE(nm.length, 26);
+  const cd = Buffer.alloc(46); cd.writeUInt32LE(0x02014b50, 0); cd.writeUInt16LE(20, 4); cd.writeUInt16LE(20, 6); cd.writeUInt16LE(method, 10); cd.writeUInt32LE(crc, 16); cd.writeUInt32LE(comp.length, 20); cd.writeUInt32LE(data.length, 24); cd.writeUInt16LE(nm.length, 28); cd.writeUInt32LE(0, 42);
+  const local = Buffer.concat([lh, nm, comp]); const central = Buffer.concat([cd, nm]);
+  const e = Buffer.alloc(22); e.writeUInt32LE(0x06054b50, 0); e.writeUInt16LE(1, 8); e.writeUInt16LE(1, 10); e.writeUInt32LE(central.length, 12); e.writeUInt32LE(local.length, 16);
+  return Buffer.concat([local, central, e]);
+}
+
+const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' };
+const fails = []; const ok = (c, m) => { if (!c) fails.push(m); console.log((c ? '✓ ' : '✗ ') + m); };
+
+(async () => {
+  const browser = await chromium.launch(process.env.CHROME ? { executablePath: process.env.CHROME } : {});
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  page.on('pageerror', (e) => fails.push('页面报错 ' + e.message));
+  page.on('console', (m) => { if (m.type() === 'error') console.log('console:', m.text()); });
+  let aiCalls = 0, naiBody = null;
+  await page.route('https://ai.test/**', async (r) => {
+    const req = r.request();
+    if (req.method() === 'OPTIONS') return r.fulfill({ status: 204, headers: CORS });
+    if (req.url().endsWith('/models')) return r.fulfill({ headers: { ...CORS, 'content-type': 'application/json' }, body: JSON.stringify({ data: [{ id: 'm-a' }, { id: 'm-b' }] }) });
+    aiCalls++;
+    const reply = aiCalls === 1 ? '好的，我来写：没有 JSON' : '<think>想一想</think>```json\n{"tag":"1girl, long hair, black hair, smile, looking back, rooftop, sunset","nl":"A girl smiles on a rooftop.","negative":"glasses","size":"landscape"}\n```';
+    const sse = [...reply].reduce((a, ch, i) => (i % 8 === 0 ? a.push(ch) : a[a.length - 1] += ch, a), []).map((p) => 'data: ' + JSON.stringify({ choices: [{ delta: { content: p } }] }) + '\n\n').join('') + 'data: [DONE]\n\n';
+    return r.fulfill({ headers: { ...CORS, 'content-type': 'text/event-stream' }, body: sse });
+  });
+  await page.route('https://nai.test/**', async (r) => {
+    const req = r.request();
+    if (req.method() === 'OPTIONS') return r.fulfill({ status: 204, headers: CORS });
+    naiBody = JSON.parse(req.postData());
+    return r.fulfill({ headers: { ...CORS, 'content-type': 'application/x-zip-compressed' }, body: zip('image_0.png', png(64, 96), 8) });
+  });
+
+  await page.goto('http://localhost:' + srv.address().port + '/' + encodeURIComponent('首页.html'));
+  await page.waitForSelector('#c-write');
+
+  // 纯函数
+  const unit = await page.evaluate(async () => {
+    const r = {};
+    r.p1 = Writer.parseReply('前缀 {"tag":["a","b"],"size":"横图"} 后缀');
+    try { Writer.parseReply('{"nl":"x"}'); r.p2 = 'no-throw'; } catch (e) { r.p2 = e.message; }
+    const s = Params.normalize({ nai: { key: 'k', artist: 'artist:foo' } });
+    const b = Nai.buildBody(s.nai, { tag: 'cat', nl: 'A cat.', negative: 'dog', size: 'landscape', seed: 7 });
+    r.b = { w: b.meta.width, h: b.meta.height, pos: b.meta.positive, neg: b.meta.negative.slice(-5), seed: b.body.parameters.seed, v4: b.body.parameters.v4_prompt.caption.base_caption === b.meta.positive };
+    try { Params.parseSize('800×1200'); r.sz = 'no-throw'; } catch (e) { r.sz = e.message; }
+    return r;
+  });
+  ok(unit.p1.tag === 'a, b' && unit.p1.size === 'landscape', '解析 AI 回复：数组 tag、中文画幅');
+  ok(/没有 tag/.test(unit.p2), '缺 tag 时报错');
+  ok(unit.b.w === 1216 && unit.b.h === 832 && unit.b.seed === 7 && unit.b.v4, '横图尺寸、固定种子、v4_prompt 同源');
+  ok(unit.b.pos.startsWith('artist:foo, cat, very aesthetic') && unit.b.pos.endsWith('. A cat.'), '正面 = 画师串 + tag + 质量词 + 英文描述：' + unit.b.pos);
+  ok(unit.b.neg === ', dog', '负面末尾接 AI 补的负面词');
+  ok(/64 的倍数/.test(unit.sz), '尺寸不是 64 倍数时报错');
+
+  // 设置页
+  await page.click('#btn-settings');
+  await page.fill('[data-k="ai.url"]', 'https://ai.test/v1');
+  await page.fill('[data-k="ai.key"]', 'sk-1');
+  await page.click('[data-act="models"]');
+  await page.click('.pick[data-m="m-b"]');
+  ok(await page.inputValue('[data-k="ai.model"]') === 'm-b', '拉取模型列表并选中');
+  await page.click('.tabs button[data-tab="nai"]');
+  await page.fill('[data-k="nai.url"]', 'https://nai.test');
+  await page.fill('[data-k="nai.key"]', 'pst-1');
+  await page.screenshot({ path: OUT + '/设置.png', fullPage: false });
+  await page.click('.page-head [data-close]');
+
+  // 创作：写提示词（第一次格式不对，自动重试）→ 自动出图
+  await page.fill('#c-desc', '黄昏天台上黑长发女孩回头笑，不要眼镜');
+  await page.click('#c-write');
+  await page.waitForFunction(() => document.querySelector('#c-tag').value.includes('1girl'), null, { timeout: 8000 });
+  ok(aiCalls === 2, 'AI 格式不对时自动重试一次（调用 ' + aiCalls + ' 次）');
+  ok(await page.inputValue('#c-neg') === 'glasses', '补充负面词填好');
+  ok(await page.$eval('#c-size button.on', (b) => b.dataset.v) === 'landscape', '画幅按 AI 选的横图');
+  await page.waitForSelector('#c-result img', { timeout: 8000 });
+  ok(naiBody && naiBody.model === 'nai-diffusion-5-full' && naiBody.parameters.width === 1216, '发给 NAI 的请求：模型、横图宽度');
+  ok(naiBody && naiBody.input.includes('very aesthetic, masterpiece') && naiBody.parameters.negative_prompt.endsWith('glasses'), '请求里带质量词、负面词');
+  const nat = await page.$eval('#c-result img', (i) => new Promise((res) => (i.complete ? res(i.naturalWidth) : (i.onload = () => res(i.naturalWidth)))));
+  ok(nat === 64, '从 zip 里解出的图片能显示（宽 ' + nat + '）');
+  await page.screenshot({ path: OUT + '/创作.png', fullPage: true });
+
+  // 图库
+  await page.click('#tabbar [data-tab="gallery"]');
+  await page.waitForSelector('.thumb');
+  ok((await page.$$('.thumb')).length === 1, '图库里有 1 张');
+  await page.click('.thumb');
+  await page.waitForSelector('.viewer img');
+  const recipe = await page.$$eval('pre.recipe', (p) => p.map((x) => x.textContent).join('\n'));
+  ok(recipe.includes('黄昏天台') && recipe.includes('种子') && recipe.includes('1216×832'), '大图页显示完整配方');
+  await page.screenshot({ path: OUT + '/图库大图.png' });
+  await page.click('[data-a="reuse"]');
+  ok(await page.$eval('#view-create', (v) => !v.hidden), '「用这套重画」回到创作页');
+
+  // 重开页面：设置、草稿、图库都还在
+  await page.reload();
+  await page.waitForSelector('#c-write');
+  ok((await page.inputValue('#c-tag')).includes('1girl'), '重开后草稿还在');
+  const kept = await page.evaluate(async () => [(await Store.get('settings')).nai.key, (await Gallery.list()).length]);
+  ok(kept[0] === 'pst-1' && kept[1] === 1, '重开后设置和图库还在');
+
+  // 返回键：先关浮层，再回创作页
+  await page.click('#tabbar [data-tab="gallery"]');
+  ok(await page.evaluate(() => window.__appBack()) === true && await page.$eval('#view-create', (v) => !v.hidden), '返回键从图库回到创作页');
+  ok(await page.evaluate(() => window.__appBack()) === false, '创作页再按返回交给系统');
+
+  await browser.close(); srv.close();
+  console.log(fails.length ? '\n失败 ' + fails.length + ' 项：\n' + fails.join('\n') : '\n全部通过');
+  process.exit(fails.length ? 1 : 0);
+})().catch((e) => { console.error(e); process.exit(1); });
