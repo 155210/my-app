@@ -40,6 +40,12 @@
 - 预设里有、但 prompt_order 里没有的条目（酒馆条目列表里也看不到）不放进顺序，编辑页底下单独列出
 - 不执行正则，也不执行酒馆助手 EJS 模板
 
+## 接口返回格式
+
+`接口.js` 的 `extract()` 认 OpenAI chat、Claude 原生（content_block_delta）、Gemini（candidates.parts）、OpenAI Responses 四种返回。
+模型名像新版 Claude（Opus/Sonnet 4.1 以后、5.x）时不发 top_p（不允许和 temperature 同时发）；接口设置里也能手动勾「不发 top_p」。
+空回复时 `explainEmpty()` 给出结束原因、可能原因和接口原始返回前 1500 字。
+
 ## 只发最近 N 层
 
 通用设置 `keepLast`（0 = 全部），每个对话可在切换面板单独设（`chat.keepLast`，留空跟随通用）。

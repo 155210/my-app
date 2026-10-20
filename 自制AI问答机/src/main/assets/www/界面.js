@@ -731,7 +731,10 @@
                 },
             });
             m.content = res.content; m.reasoning = res.reasoning;
-            if (!res.content && !res.reasoning) m.error = '接口返回了空内容';
+            if (!res.content.trim()) {
+                if (!res.reasoning.trim()) m.error = Api.explainEmpty(res);
+                else m.error = '只返回了思考过程，没有正文' + (res.finish ? '（结束原因：' + res.finish + '）' : '') + '。多半是「最大回复长度」太小被思考用完了，调大再试。';
+            }
         } catch (e) {
             if (e && e.name === 'AbortError') {
                 if (!m.content) m.error = '已停止';
@@ -914,6 +917,7 @@
             + '<div class="field"><label>Key</label><div class="row"><input type="password" class="grow" data-k="key" autocomplete="off"><button class="btn small" data-eye>显示</button></div></div>'
             + '<div class="field"><label>默认模型</label><div class="row"><input type="text" class="grow" data-k="model" list="api-models"><button class="btn small" data-fetch>拉取列表</button></div><datalist id="api-models"></datalist></div>'
             + '<label class="check"><input type="checkbox" data-k="sendTopK"> 发送 top_k（有的接口不认这个参数会报错，默认不发）</label>'
+            + '<label class="check"><input type="checkbox" data-k="noTopP"> 不发 top_p（新版 Claude 不允许 temperature 和 top_p 一起发，报错或空回复时勾上）</label>'
             + '<div class="section-title">高级（不懂可以不填）</div>'
             + '<div class="field"><label>额外请求参数（JSON，会合并进请求体）</label><textarea class="ta" data-k="extra" placeholder=\'{"reasoning_effort": "high"}\'></textarea></div>'
             + '<div class="field"><label>额外请求头（JSON）</label><textarea class="ta" data-k="headers" placeholder=\'{"X-Title": "asker"}\'></textarea></div>'
