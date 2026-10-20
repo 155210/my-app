@@ -49,6 +49,9 @@
     // fn(params, nai, p, extra) 直接改 parameters，不用改这个文件；往 extra 里放的东西会记进这张图的配方（meta）
     const hooks = [];
     const addHook = (fn) => hooks.push(fn);
+    // 扩展口：改 parameters 以外的部分（action、model、input），Nai.addBodyHook(fn)，fn(body, nai, p)。图生图 / 局部重绘用它
+    const bodyHooks = [];
+    const addBodyHook = (fn) => bodyHooks.push(fn);
 
     function randomSeed() { return Math.floor(Math.random() * 2 ** 32); }
 
@@ -107,8 +110,10 @@
             params.deliberate_euler_ancestral_bug = false;
             params.prefer_brownian = true;
         }
+        const body = { input: positive, model: nai.model, action: 'generate', parameters: params, use_new_shared_trial: true };
+        bodyHooks.forEach((h) => h(body, nai, p));
         return {
-            body: { input: positive, model: nai.model, action: 'generate', parameters: params, use_new_shared_trial: true },
+            body,
             meta: Object.assign({ positive, negative, width, height, seed, model: nai.model, sampler, steps: params.steps, scale: params.scale, size: orientation, style: (activeStyle(nai) || {}).name || '', transparent: !!(nai.transparent && v5), furry: !!(nai.furry && !Params.isV3(nai.model)) }, extra),
         };
     }
@@ -261,5 +266,5 @@
     // lastSeed：最近出的一张的种子（锁定种子用）
     const state = { lastSeed: 0 };
 
-    window.Nai = { generate, test, subscription, usageText, buildBody, fullPrompts, activeStyle, unzipFirstImage, endpoint, addHook, addTagFilter, state };
+    window.Nai = { generate, test, subscription, usageText, buildBody, fullPrompts, activeStyle, unzipFirstImage, endpoint, addHook, addBodyHook, addTagFilter, state };
 })();
