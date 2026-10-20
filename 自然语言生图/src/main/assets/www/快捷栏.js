@@ -65,7 +65,7 @@
     CreatePage.refresh = function () { refresh.apply(this, arguments); render(); };
 
     // ------------------------------------------------------------
-    // Anlas 余额（只有官方站或带订阅接口的站才显示）
+    // Anlas 余额 + Opus 免费额度（只有官方站或带订阅接口的站才显示）
     // ------------------------------------------------------------
     const chip = document.createElement('button');
     chip.id = 'anlas-chip';
@@ -74,9 +74,12 @@
     chip.title = '点一下刷新';
     $('#topbar').insertBefore(chip, $('#btn-settings'));
 
-    function show(n) {
-        chip.hidden = n == null;
-        chip.textContent = 'Anlas ' + n;
+    // d：Nai.subscription 的结果
+    function show(d) {
+        chip.hidden = !d;
+        if (!d) return;
+        chip.textContent = 'Anlas ' + d.anlas + (d.usage ? ' · Opus ' + d.usage.percent + '%' : '');
+        chip.classList.toggle('low', !!(d.usage && d.usage.percent < 5));
     }
 
     let busy = false, timer = 0;
@@ -85,8 +88,8 @@
         busy = true;
         try {
             const d = await Nai.subscription(nai());
-            show(d ? d.anlas : null);
-            if (manual) toast(d ? 'success' : 'info', d ? 'Anlas 余额 ' + d.anlas : '这个站查不到余额');
+            show(d);
+            if (manual) toast(d ? 'success' : 'info', d ? 'Anlas 余额 ' + d.anlas + (d.usage ? '\n' + Nai.usageText(d.usage) : '') : '这个站查不到余额');
         } catch (e) {
             if (manual) toast('error', e.message || String(e));
         } finally { busy = false; }
