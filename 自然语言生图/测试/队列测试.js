@@ -135,7 +135,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await page.click('#c-queue');
   const btns = await page.$$('[data-q-list] [data-cancel]');
   ok(btns.length === 2, '队列面板列出 2 张');
-  await btns[1].click();
+  await page.locator('[data-q-list] [data-cancel]').nth(1).click(); // 列表出图时会重画，按位置重新找
   await page.click('.sheet [data-close]');
   await idle();
   ok(await count() === b2 + 1, '取消排队中的 1 张，另 1 张照常出');

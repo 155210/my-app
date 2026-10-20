@@ -46,6 +46,19 @@ const fails = []; const ok = (c, m) => { if (!c) fails.push(m); console.log((c ?
   ok(by['初音未来唱歌'] === '初音未来:char 博歌樂:work', '权重写法 {hatsune_miku} 也认，作品单独列：' + by['初音未来唱歌']);
   ok(by['两个人'] === '初音未来:char 将军:char', '多角色里的标签也认；同人身份标签算到角色库「将军」名下：' + by['两个人']);
   ok(by['风景'] === '', '没角色的图什么都不列');
+  // 标签库里没有的新角色（AI 写成「名字 (作品)」）
+  const det2 = await page.evaluate(async () => {
+    const items = [
+      { id: 'a', desc: '', tag: '1girl, zzyzx girl (my original series), smile', meta: {} },
+      { id: 'b', desc: '', tag: '1girl, hatsune miku (vocaloid)', meta: {} },
+      { id: 'c', desc: '', tag: '1girl, bow (weapon), star (sky), shirt', meta: {} },
+    ];
+    const m = await GalleryChars.index(items);
+    return items.map((x) => m.get(x.id).map((c) => c.label + ':' + c.kind).join(' '));
+  });
+  ok(det2[0] === 'zzyzx girl (my original series):char', '标签库里没有的新角色也列出来：' + det2[0]);
+  ok(det2[1] === '初音未来:char', '「名字 (作品)」括号前对得上已有角色就算那个角色：' + det2[1]);
+  ok(det2[2] === '', '弓 (武器)、星星 (天空) 这类带括号的普通标签不算角色：' + det2[2]);
 
   // 界面：筛选条
   await page.click('#tabbar [data-tab="gallery"]');
