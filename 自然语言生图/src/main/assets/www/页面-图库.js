@@ -10,6 +10,8 @@
     const root = () => $('#view-gallery');
     const ICON_MORE = '<svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></svg>';
     const ICON_SEL = '<svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 12l3 3 5-6"/></svg>';
+    const ICON_STAR = '<svg viewBox="0 0 24 24"><path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z"/></svg>';
+    const ICON_ALBUM = '<svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>';
     const ICON_READ = '<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h10M7 13h6"/></svg>';
     const ICON_INFO = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/></svg>';
 
@@ -59,7 +61,7 @@
     // ------------------------------------------------------------
     let gridUrls = [];
     let sel = null;        // 多选模式：选中的 id 集合；null = 没在多选
-    const filt = { q: '', key: '' }; // 搜索词、选中的角色 / 作品（GalleryChars 的 key）
+    const filt = { q: '', key: '', view: '' }; // 搜索词、选中的角色 / 作品（GalleryChars 的 key）、看哪组：'' 全部 / 'fav' 收藏 / 相册 id
     let shownIds = null;   // 筛选后网格里的图（null = 没筛选），大图左右滑只在这些里换
     let qTimer = 0;
     let observer = null;
@@ -74,22 +76,34 @@
         const p = await Gallery.getPrefs();
         if (!items.length) {
             r.innerHTML = '<div class="empty"><b>还没有图</b>在「创作」里出的图会自动存在这里'
-                + '<div class="btns" style="justify-content:center"><button class="btn" id="g-read">读取图片信息</button></div></div>';
+                + '<div class="btns" style="justify-content:center"><button class="btn" id="g-import">导入外部图片</button><button class="btn" id="g-read">读取图片信息</button></div></div>';
             $('#g-read', r).onclick = pickAndRead;
+            $('#g-import', r).onclick = pickAndImport;
             return;
         }
         const all = items;
+        const albums = await Gallery.albums();
+        if (filt.view && filt.view !== 'fav' && !albums.some((a) => a.id === filt.view)) filt.view = '';
+        const inView = (x) => !filt.view || (filt.view === 'fav' ? x.fav : (x.albums || []).includes(filt.view));
         const found = window.GalleryChars ? await GalleryChars.index(all) : new Map();
         const chipList = window.GalleryChars ? GalleryChars.chips(found) : [];
         if (filt.key && !chipList.some((c) => c.key === filt.key)) filt.key = '';
-        const filtering = !!(filt.q.trim() || filt.key);
-        items = all.filter((x) => (!filt.key || (found.get(x.id) || []).some((c) => c.key === filt.key))
+        const filtering = !!(filt.q.trim() || filt.key || filt.view);
+        items = Gallery.sorted(all, p.sort).filter((x) => inView(x) && (!filt.key || (found.get(x.id) || []).some((c) => c.key === filt.key))
             && (!window.GalleryChars || GalleryChars.matches(x, found.get(x.id) || [], filt.q)));
         shownIds = filtering ? items.map((x) => x.id) : null;
         const total = all.reduce((a, x) => a + (x.bytes || 0), 0);
         const full = p.size === 'full';
         if (sel) for (const id of [...sel]) if (!items.some((x) => x.id === id)) sel.delete(id);
-        const filterRow = '<div class="g-filter"><input type="search" id="g-q" placeholder="搜角色、描述、标签（中文英文都行）" value="' + esc(filt.q) + '">'
+        const favN = all.filter((x) => x.fav).length;
+        const viewRow = '<div class="g-views"><div class="g-chips" id="g-views">'
+            + '<button data-view=""' + (filt.view ? '' : ' class="on"') + '>全部</button>'
+            + '<button data-view="fav"' + (filt.view === 'fav' ? ' class="on"' : '') + '>★ 收藏<span>' + favN + '</span></button>'
+            + albums.map((a) => '<button data-view="' + esc(a.id) + '"' + (filt.view === a.id ? ' class="on"' : '') + '>' + esc(a.name)
+                + '<span>' + all.filter((x) => (x.albums || []).includes(a.id)).length + '</span></button>').join('')
+            + '<button data-view="+" class="add">＋ 相册</button></div>'
+            + '<select id="g-sort" aria-label="排序">' + Gallery.SORTS.map(([k, t]) => '<option value="' + k + '"' + (k === p.sort ? ' selected' : '') + '>' + t + '</option>').join('') + '</select></div>';
+        const filterRow = viewRow + '<div class="g-filter"><input type="search" id="g-q" placeholder="搜角色、描述、标签（中文英文都行）" value="' + esc(filt.q) + '">'
             + (chipList.length ? '<div class="g-chips" id="g-chips"><button data-key=""' + (filt.key ? '' : ' class="on"') + '>全部</button>'
                 + chipList.map((c) => '<button data-key="' + esc(c.key) + '"' + (c.key === filt.key ? ' class="on"' : '') + ' title="' + esc(c.en || '') + '">'
                     + (c.kind === 'work' ? '<i>作品</i>' : '') + esc(c.label) + '<span>' + c.n + '</span></button>').join('') + '</div>'
@@ -98,19 +112,21 @@
         r.innerHTML = (sel
             ? '<div class="g-bar sel-bar"><button class="icon-btn" id="g-sel-x" aria-label="退出多选">' + UI.ICON.close + '</button>'
                 + '<b class="grow" id="g-sel-n"></b><button class="btn small" id="g-sel-all"></button>'
-                + '<button class="btn small" id="g-sel-save">保存</button><button class="btn small danger" id="g-sel-del">删除</button></div>'
+                + '<button class="btn small" id="g-sel-more">收藏 / 相册</button><button class="btn small" id="g-sel-save">保存</button><button class="btn small danger" id="g-sel-del">删除</button></div>'
             : '<div class="g-bar"><span class="card-sub">' + (filtering ? '筛出 ' + items.length + ' / ' + all.length + ' 张' : '共 ' + all.length + ' 张' + (total ? ' · ' + mb(total) : '')) + '</span>'
                 + '<div class="seg" id="g-size">' + Gallery.SIZES.map(([k, t]) => '<button data-v="' + k + '"' + (k === p.size ? ' class="on"' : '') + '>' + t + '</button>').join('') + '</div>'
                 + '<button class="icon-btn" id="g-sel" aria-label="多选">' + ICON_SEL + '</button>'
                 + '<button class="icon-btn" id="g-read" aria-label="读取图片信息">' + ICON_READ + '</button>'
                 + '<button class="icon-btn" id="g-opts" aria-label="图库选项">' + ICON_MORE + '</button></div>')
             + filterRow
-            + (items.length ? '' : '<div class="empty" style="margin-top:8vh"><b>没有符合的图</b>换个词，或者点「全部」</div>')
+            + (items.length ? '' : '<div class="empty" style="margin-top:8vh"><b>' + (filt.view === 'fav' && !filt.q && !filt.key ? '还没有收藏' : filt.view && !filt.q && !filt.key ? '这个相册还是空的' : '没有符合的图')
+                + '</b>' + (filt.view && !filt.q && !filt.key ? '长按图片（或多选后点「收藏 / 相册」）就能放进来' : '换个词，或者点「全部」') + '</div>')
             + '<div class="grid size-' + p.size + '">' + items.map((x) => {
                 const m = x.meta || {};
                 const ar = full && m.width && m.height ? ' style="aspect-ratio:' + m.width + '/' + m.height + '"' : '';
                 return '<button class="thumb' + (sel && sel.has(x.id) ? ' picked' : '') + '" data-id="' + x.id + '"' + ar + '>'
-                    + (x.thumb ? '<img src="' + x.thumb + '" alt="" draggable="false">' : '<span>' + esc(x.ext) + '</span>') + '</button>';
+                    + (x.thumb ? '<img src="' + x.thumb + '" alt="" draggable="false">' : '<span>' + esc(x.ext) + '</span>')
+                    + (x.fav ? '<b class="fav-mark">★</b>' : '') + '</button>';
             }).join('') + '</div>';
         const grid = r.querySelector('.grid');
         grid.classList.toggle('selecting', !!sel);
@@ -128,6 +144,19 @@
                 if (q2) { q2.focus(); q2.setSelectionRange(q2.value.length, q2.value.length); }
             }, 250);
         };
+        $('#g-sort', r).onchange = async (e) => { await Gallery.setPrefs({ sort: e.target.value }); refresh(); };
+        const views = $('#g-views', r);
+        views.onclick = async (e) => {
+            const b = e.target.closest('[data-view]'); if (!b) return;
+            if (b.dataset.view === '+') {
+                const a = await newAlbum();
+                if (a) { filt.view = a.id; refresh(); }
+                return;
+            }
+            filt.view = b.dataset.view;
+            refresh();
+        };
+        onLongPress(views, (e) => e.target.closest && e.target.closest('[data-view]:not([data-view=""]):not([data-view="fav"]):not([data-view="+"])'), (b) => albumMenu(b.dataset.view));
         const chipBox = $('#g-chips', r);
         if (chipBox) {
             chipBox.onclick = (e) => {
@@ -156,7 +185,7 @@
             };
             $('#g-sel', r).onclick = () => startSelect();
             $('#g-opts', r).onclick = openOptions;
-            $('#g-read', r).onclick = pickAndRead;
+            $('#g-read', r).onclick = readOrImport;
         }
         // 大 / 铺满：缩略图不够清楚，滚到眼前时换成原图
         if ((p.size === 'l' || full) && 'IntersectionObserver' in window) {
@@ -209,6 +238,25 @@
             r.querySelectorAll('.thumb').forEach((t) => t.classList.toggle('picked', sel.has(t.dataset.id)));
             updateSelBar();
         };
+        $('#g-sel-more', r).onclick = async () => {
+            if (!sel.size) { toast('info', '先勾几张图'); return; }
+            const ids = [...sel];
+            const inAlbum = filt.view && filt.view !== 'fav';
+            const k = await menu('选中的 ' + ids.length + ' 张', [
+                { k: 'fav', label: '收藏', icon: ICON_STAR },
+                { k: 'unfav', label: '取消收藏', icon: ICON_STAR },
+                { k: 'album', label: '加进相册…', icon: ICON_ALBUM },
+            ].concat(inAlbum ? [{ k: 'out', label: '移出这个相册', icon: ICON_ALBUM }] : []));
+            if (k === 'fav' || k === 'unfav') { await Gallery.mark(ids, { fav: k === 'fav' }); toast('success', k === 'fav' ? '收藏了 ' + ids.length + ' 张' : '取消收藏 ' + ids.length + ' 张'); }
+            else if (k === 'album') {
+                const a = await pickAlbum();
+                if (!a) return;
+                await Gallery.mark(ids, { album: a.id, on: true });
+                toast('success', '放进「' + a.name + '」' + ids.length + ' 张');
+            } else if (k === 'out') { await Gallery.mark(ids, { album: filt.view, on: false }); toast('success', '移出了 ' + ids.length + ' 张（图还在）'); }
+            else return;
+            endSelect();
+        };
         $('#g-sel-save', r).onclick = async (e) => {
             const b = e.target;
             const picked = items.filter((x) => sel.has(x.id));
@@ -243,6 +291,8 @@
         if (!item) return;
         const k = await menu('', [
             { k: 'save', label: '保存到手机', icon: UI.ICON.save },
+            { k: 'fav', label: item.fav ? '取消收藏' : '收藏', icon: ICON_STAR },
+            { k: 'album', label: '加进相册…', icon: ICON_ALBUM },
             { k: 'recipe', label: '看配方', icon: ICON_INFO },
             { k: 'read', label: '读图片里藏的信息', icon: ICON_READ },
             { k: 'copy', label: '复制正面', icon: UI.ICON.copy },
@@ -250,11 +300,67 @@
             { k: 'del', label: '删除', icon: UI.ICON.del, danger: true },
         ]);
         if (k === 'multi') startSelect(item.id);
+        if (k === 'fav') { await Gallery.mark([item.id], { fav: !item.fav }); refresh(); }
+        if (k === 'album') {
+            const a = await pickAlbum(item);
+            if (a) { await Gallery.mark([item.id], { album: a.id, on: true }); toast('success', '放进「' + a.name + '」'); refresh(); }
+        }
         if (k === 'save') save(item);
         if (k === 'recipe') openRecipe(item);
         if (k === 'read') readItem(item);
         if (k === 'copy') UI.copyText((item.meta || {}).positive || item.tag);
         if (k === 'del' && await confirmDelete(item)) refresh();
+    }
+
+    // ------------------------------------------------------------
+    // 相册：新建、选一个、改名、删除
+    // ------------------------------------------------------------
+    function ask(title, value, placeholder, okText) {
+        return new Promise((resolve) => {
+            let done = false;
+            const L = UI.openLayer('dialog', '<h3>' + esc(title) + '</h3><div class="field"><input type="text" data-v value="' + esc(value || '') + '" placeholder="' + esc(placeholder || '') + '"></div>'
+                + '<div class="btns"><button class="btn" data-close>取消</button><button class="btn primary" data-ok>' + esc(okText || '确定') + '</button></div>',
+            { onClose: () => { if (!done) resolve(null); } });
+            const inp = $('[data-v]', L.box);
+            setTimeout(() => inp.focus(), 50);
+            const ok = () => { const v = inp.value.trim(); if (!v) { inp.focus(); return; } done = true; UI.closeLayer(L, true); resolve(v); };
+            $('[data-ok]', L.box).onclick = ok;
+            inp.onkeydown = (e) => { if (e.key === 'Enter') ok(); };
+        });
+    }
+    async function newAlbum() {
+        const name = await ask('新建相册', '', '比如：小雪、壁纸、待修', '建好');
+        if (!name) return null;
+        const a = await Gallery.addAlbum(name);
+        toast('success', '建好了「' + a.name + '」，长按图片就能放进来');
+        return a;
+    }
+    /** 选一个相册（可以当场新建），返回相册或 null */
+    async function pickAlbum(item) {
+        const list = await Gallery.albums();
+        if (!list.length) return newAlbum();
+        const k = await menu('放进哪个相册', list.map((a) => ({ k: a.id, label: a.name + (item && (item.albums || []).includes(a.id) ? '（已在）' : ''), icon: ICON_ALBUM }))
+            .concat([{ k: '+', label: '新建相册…', icon: '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>' }]));
+        if (!k) return null;
+        if (k === '+') return newAlbum();
+        return list.find((a) => a.id === k) || null;
+    }
+    async function albumMenu(id) {
+        const a = (await Gallery.albums()).find((x) => x.id === id);
+        if (!a) return;
+        const k = await menu('相册「' + a.name + '」', [
+            { k: 'rename', label: '改名', icon: UI.ICON.reuse },
+            { k: 'del', label: '删除相册（图不删）', icon: UI.ICON.del, danger: true },
+        ]);
+        if (k === 'rename') {
+            const n = await ask('相册改名', a.name, '', '保存');
+            if (n) { await Gallery.renameAlbum(id, n); refresh(); }
+        } else if (k === 'del') {
+            if (!await UI.confirmBox('删除相册「' + a.name + '」？', '只删这个分组，里面的图都还在图库里。', '删除', true)) return;
+            await Gallery.removeAlbum(id);
+            if (filt.view === id) filt.view = '';
+            refresh();
+        }
     }
 
     async function openOptions() {
@@ -271,6 +377,11 @@
             + '<button class="btn small" id="g-pick">' + (p.saveTree ? '换一个文件夹' : '选文件夹') + '</button>'
             + '<label class="check" style="margin:8px 0 0"><input type="checkbox" id="g-hide"' + (p.saveHide ? ' checked' : '') + '><span>在这个文件夹里放 .nomedia，系统相册里看不到</span></label></div>'
             + '<div style="margin:-4px 0 14px;font-size:12px;color:var(--faint)">存的都是原图，NAI 写在 PNG 里的提示词不会丢，拖回官网或用「读取图片信息」都能读出来。</div>'
+            + '<div class="section-title">保存到手机的文件名</div>'
+            + '<div class="field"><input type="text" id="g-rule" value="' + esc(p.nameRule || Gallery.NAME_RULE) + '" placeholder="' + esc(Gallery.NAME_RULE) + '">'
+            + '<div class="g-tokens">' + Gallery.NAME_TOKENS.map(([t, h]) => '<button class="btn small" data-token="' + esc(t) + '" title="' + esc(h) + '">' + esc(t) + '</button>').join('') + '</div>'
+            + '<div class="help" id="g-rule-eg"></div>'
+            + '<div class="help">点上面的格子插进去；{计数} 从 ' + ((p.nameCounter || 0) + 1) + ' 开始。<a href="#" id="g-rule-reset">恢复默认</a>' + (p.nameCounter ? '<a href="#" id="g-count-reset">计数归零</a>' : '') + '</div></div>'
             + '<div class="section-title">省空间</div>'
             + '<label class="check"><span class="switch"><input type="checkbox" id="g-jpg"' + (p.jpg ? ' checked' : '') + '><span></span></span>'
             + '<span>新图自动转存成 JPG<div class="help">NAI 回的是 PNG，一张 1~2 MB；转成 JPG 大约省一半以上，肉眼看不出差别。App 里的配方另外存着不受影响，'
@@ -282,6 +393,27 @@
             + '<div class="card-sub">' + (pngs.length ? '一共 ' + mb(pngs.reduce((a, x) => a + (x.bytes || 0), 0)) + '，可以一次全转成 JPG。' : '没有要转的。') + '</div>'
             + '<div class="btns"><button class="btn" id="g-conv"' + (pngs.length ? '' : ' disabled') + '>全部转成 JPG</button></div></div>'
             + '<div class="btns"><button class="btn primary" data-close>好</button></div>');
+        const rule = $('#g-rule', L.box), eg = $('#g-rule-eg', L.box);
+        const sample = items[0] || { time: Date.now(), ext: 'png', tag: '1girl, smile', desc: '黄昏天台', meta: { seed: 123456, width: 832, height: 1216 } };
+        const showEg = () => { eg.textContent = '例子：' + Gallery.nameByRule(sample, rule.value || Gallery.NAME_RULE, (p.nameCounter || 0) + 1) + '.' + (sample.ext || 'png'); };
+        showEg();
+        let ruleTimer = 0;
+        rule.oninput = () => { showEg(); clearTimeout(ruleTimer); ruleTimer = setTimeout(() => Gallery.setPrefs({ nameRule: rule.value.trim() || Gallery.NAME_RULE }), 300); };
+        // 点格子时输入框已经失焦、光标位置读不到了，失焦前记下来；没点过输入框就接在最后
+        let caret = null;
+        rule.addEventListener('blur', () => { caret = [rule.selectionStart, rule.selectionEnd]; });
+        $('.g-tokens', L.box).onclick = (e) => {
+            const b = e.target.closest('[data-token]'); if (!b) return;
+            const [at, end] = caret ? [Math.min(caret[0], rule.value.length), Math.min(caret[1], rule.value.length)] : [rule.value.length, rule.value.length];
+            const sep = at && !/[_\-\s]$/.test(rule.value.slice(0, at)) ? '_' : '';
+            const ins = sep + b.dataset.token;
+            rule.value = rule.value.slice(0, at) + ins + rule.value.slice(end);
+            caret = [at + ins.length, at + ins.length]; // 下一个接在后面
+            rule.dispatchEvent(new Event('input'));
+        };
+        $('#g-rule-reset', L.box).onclick = (e) => { e.preventDefault(); rule.value = Gallery.NAME_RULE; rule.dispatchEvent(new Event('input')); };
+        const cr = $('#g-count-reset', L.box);
+        if (cr) cr.onclick = async (e) => { e.preventDefault(); await Gallery.setPrefs({ nameCounter: 0 }); cr.remove(); p.nameCounter = 0; showEg(); toast('success', '计数从 1 重新开始'); };
         const custom = $('#g-custom', L.box);
         const pick = () => new Promise((resolve) => {
             if (!app || !window.AndroidBridge.pickSaveFolder) { toast('warning', '装到手机上才能选文件夹'); resolve(false); return; }
@@ -396,6 +528,59 @@
         inp.click();
     }
 
+    /** 顶栏「读图」：导入到图库，或者只看信息 */
+    async function readOrImport() {
+        const k = await menu('外部图片', [
+            { k: 'import', label: '导入到图库（可以选多张）', icon: UI.ICON.save },
+            { k: 'read', label: '只读取图片信息，不导入', icon: ICON_READ },
+        ]);
+        if (k === 'import') pickAndImport();
+        if (k === 'read') pickAndRead();
+    }
+
+    function pickAndImport() {
+        const inp = document.createElement('input');
+        inp.type = 'file';
+        inp.accept = 'image/*';
+        inp.multiple = true;
+        inp.onchange = () => { const fs = [...(inp.files || [])]; if (fs.length) importFiles(fs); };
+        inp.click();
+    }
+
+    /** 外部图片进图库：原样保存（不转 JPG），图里带 NAI 出图信息的把提示词和参数一起记进配方 */
+    async function importFiles(files) {
+        let n = 0, withInfo = 0, last = null;
+        for (const f of files) {
+            try {
+                let info = null;
+                try { info = await Gallery.readInfo(f); } catch (e) { info = null; }
+                let w = 0, h = 0;
+                try { const bmp = await createImageBitmap(f); w = bmp.width; h = bmp.height; } catch (e) { continue; } // 不是图片
+                const ext = (String(f.name).match(/\.(\w+)$/) || [])[1] || String(f.type).split('/')[1] || 'png';
+                const rec = { desc: '', tag: '', nl: '', extraNegative: '', meta: { width: w, height: h, size: w > h ? 'landscape' : 'portrait' } };
+                if (info) {
+                    const d = toDraft(Object.assign({}, info, { params: Object.assign({ width: w, height: h }, info.params) }));
+                    const pp = info.params;
+                    Object.assign(rec, { tag: d.tag, nl: d.nl, extraNegative: d.extraNegative });
+                    Object.assign(rec.meta, { positive: info.prompt, negative: info.negative, seed: pp.seed, sampler: pp.sampler, steps: pp.steps, scale: pp.scale,
+                        cfgRescale: pp.cfg_rescale, noiseSchedule: pp.noise_schedule, source: info.source || info.software || undefined });
+                    if (info.chars.length) rec.meta.characters = info.chars.map((c) => ({ tag: c.prompt, negative: c.negative }));
+                    Object.keys(rec.meta).forEach((k) => rec.meta[k] === undefined && delete rec.meta[k]);
+                    withInfo++;
+                }
+                last = await Gallery.add(f, ext.toLowerCase(), Object.assign(rec, { imported: true, name: f.name, keepOriginal: true }));
+                n++;
+            } catch (e) {
+                toast('error', (f.name || '') + '：' + (e.message || e), '导入失败');
+            }
+        }
+        if (!n) { toast('warning', '没有导入任何图片'); return; }
+        filt.view = ''; filt.key = ''; filt.q = '';
+        await refresh();
+        toast('success', '导入了 ' + n + ' 张' + (withInfo ? '，' + withInfo + ' 张带出图信息，点开「用这套重画」就能把参数填回创作页' : '（图里没有 NAI 出图信息）'), '导入完成');
+        if (n === 1 && withInfo && last) openViewer(last.id);
+    }
+
     async function readItem(item) {
         const blob = await Gallery.getBlob(item.id);
         if (!blob) { toast('error', '原图找不到了'); return; }
@@ -473,7 +658,7 @@
         let idx = items.findIndex((x) => x.id === id);
         if (idx < 0) return;
         let url = '';
-        const L = UI.openLayer('page', '<div class="page-head"><button class="icon-btn" data-close>' + UI.ICON.back + '</button><b data-title></b><span class="badge" data-count></span></div>'
+        const L = UI.openLayer('page', '<div class="page-head"><button class="icon-btn" data-close>' + UI.ICON.back + '</button><b data-title></b><button class="icon-btn v-fav" data-fav aria-label="收藏">' + ICON_STAR + '</button><span class="badge" data-count></span></div>'
             + '<div class="viewer"><div class="v-stage"><img data-img alt="" draggable="false"></div>'
             + '<div class="v-tip" data-tip>左右滑换图 · 双指或双击放大 · 长按保存 · 上滑看配方</div>'
             + '<div class="acts big">'
@@ -514,6 +699,7 @@
             const item = cur();
             $('[data-title]', L.box).textContent = new Date(item.time).toLocaleString();
             $('[data-count]', L.box).textContent = (idx + 1) + ' / ' + items.length;
+            $('[data-fav]', L.box).classList.toggle('on', !!item.fav);
             const blob = await Gallery.getBlob(item.id);
             if (url) URL.revokeObjectURL(url);
             url = blob ? URL.createObjectURL(blob) : '';
@@ -655,6 +841,15 @@
             if (k === 'recipe') openRecipe(cur(), close);
             if (k === 'read') readItem(cur());
         }
+
+        $('[data-fav]', L.box).onclick = async () => {
+            const item = cur(), on = !item.fav;
+            await Gallery.mark([item.id], { fav: on });
+            item.fav = on;
+            $('[data-fav]', L.box).classList.toggle('on', on);
+            toast('success', on ? '已收藏' : '已取消收藏');
+            refresh();
+        };
 
         $('.acts', L.box).onclick = async (e) => {
             const b = e.target.closest('button'); if (!b) return;
