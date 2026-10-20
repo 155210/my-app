@@ -131,7 +131,8 @@ const tmp = fs.mkdtempSync(path.join(OUT, 'vibe-'));
   await page.click('#c-chars label:has([data-a="place"]) .switch');
   ok(!(await page.$('.pos-pad')) && await page.evaluate(() => Characters.get().every((c) => !c.pos)), '关掉自己摆位置，位置清空');
 
-  // ---------- 画风参考图 ----------
+  // ---------- 画风参考图（V5 官方没有，用 V4.5 Curated 测） ----------
+  await page.evaluate(() => { UI.settings.nai.model = 'nai-diffusion-4-5-curated'; CreatePage.refresh(); });
   const img = path.join(tmp, 'ref.png') // 文件名用英文：Playwright 传中文文件名时 change 事件不触发;
   fs.writeFileSync(img, PNG);
   await page.click('#c-vibes [data-a="add"]');
@@ -151,7 +152,7 @@ const tmp = fs.mkdtempSync(path.join(OUT, 'vibe-'));
   await page.click('#c-draw');
   for (let i = 0; i < 40 && bodies.length < n0 + 2; i++) await page.waitForTimeout(150);
   ok(encodes.length === 1, '一次出两张只编码一次：' + encodes.length);
-  ok(encodes[0].information_extracted === 0.5 && encodes[0].model === 'nai-diffusion-5-full' && encodes[0].image === PNG.toString('base64'), '编码请求带原图、信息提取量、模型');
+  ok(encodes[0].information_extracted === 0.5 && encodes[0].model === 'nai-diffusion-4-5-curated' && encodes[0].image === PNG.toString('base64'), '编码请求带原图、信息提取量、模型');
   p = bodies[bodies.length - 1].parameters;
   ok(p.reference_image_multiple_cached.length === 1 && p.reference_image_multiple_cached[0].data === Buffer.alloc(200, 1).toString('base64') && p.reference_strength_multiple[0] === 0.8, '出图带上编码和强度');
   ok((await page.textContent('.vibe-item [data-st]')).includes('已编码'), '编码后显示已编码');
@@ -183,7 +184,7 @@ const tmp = fs.mkdtempSync(path.join(OUT, 'vibe-'));
   const file = path.join(tmp, 'out.naiv4vibe');
   await (await dl).saveAs(file);
   const j = JSON.parse(fs.readFileSync(file, 'utf8'));
-  ok(j.identifier === 'novelai-vibe-transfer' && Object.keys(j.encodings.v5full).length === 2 && j.importInfo.strength === 0.8, '导出官方格式，两份编码都在');
+  ok(j.identifier === 'novelai-vibe-transfer' && Object.keys(j.encodings['v4-5curated']).length === 2 && j.importInfo.strength === 0.8, '导出官方格式，两份编码都在');
   // 官网导出的那种：没原图、只有 v4-5full 编码
   const offi = { identifier: 'novelai-vibe-transfer', version: 1, type: 'encoding', name: '官网的', encodings: { 'v4-5full': { abc: { encoding: 'QUJD', params: { information_extracted: 0.7 } } } }, importInfo: { strength: 0.4 } };
   fs.writeFileSync(path.join(tmp, 'official.naiv4vibe'), JSON.stringify(offi));
@@ -193,7 +194,7 @@ const tmp = fs.mkdtempSync(path.join(OUT, 'vibe-'));
   await (await chooser).setFiles(path.join(tmp, 'official.naiv4vibe'));
   await page.waitForFunction(() => document.querySelectorAll('.vibe-item').length === 2);
   ok(await page.evaluate(() => { const v = UI.settings.nai.vibes[1]; return v.name === '官网的' && v.strength === 0.4 && v.info === 0.7; }), '导入官网 .naiv4vibe：名字、强度、信息提取量');
-  ok((await page.textContent('.vibe-item[data-i="1"] [data-st]')).includes('没有 V5 Full 的编码'), '没有当前模型编码时提示');
+  ok((await page.textContent('.vibe-item[data-i="1"] [data-st]')).includes('没有 V4.5 Curated 的编码'), '没有当前模型编码时提示');
   await page.click('#c-draw');
   await page.waitForTimeout(500);
   ok(await page.evaluate(() => Queue.state().failed) >= 1, '缺编码又没原图时出图失败并提示');
@@ -204,6 +205,11 @@ const tmp = fs.mkdtempSync(path.join(OUT, 'vibe-'));
   p = bodies[bodies.length - 1].parameters;
   ok(bodies.length > nb && p.reference_image_multiple_cached[0].data === 'QUJD' && p.reference_strength_multiple[0] === 0.4, '换到 V4.5 能用导入的编码');
   await page.screenshot({ path: OUT + '/画风参考.png', fullPage: true });
+  // V5：不编码也不发，卡片上说明
+  await page.evaluate(() => { UI.settings.nai.model = 'nai-diffusion-5-full'; UI.settings.nai.vibes.forEach((v) => { v.on = true; }); CreatePage.refresh(); });
+  const v5v = await page.evaluate(async () => { await Vibes.prepare(UI.settings.nai); return Nai.buildBody(UI.settings.nai, { tag: 'x' }).body.parameters; });
+  ok(v5v.reference_image_multiple_cached.length === 0 && (await page.textContent('#c-vibes [data-st]')).includes('V5 官方不支持'), 'V5 下参考图不发不编码，卡片上说明');
+  await page.evaluate(() => { UI.settings.nai.model = 'nai-diffusion-4-5-full'; UI.settings.nai.vibes[0].on = false; CreatePage.refresh(); });
 
   // ---------- 角色参考（精准参考） ----------
   ok((await page.textContent('#c-dirrefs')).includes('每张 +5 Anlas'), '角色参考卡片标了 +5 Anlas');

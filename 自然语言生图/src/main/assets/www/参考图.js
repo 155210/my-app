@@ -109,7 +109,8 @@
     }
 
     /** V4.5 开了角色参考（精准参考）时，官网会把 Vibe 藏起来：两个一起发 NAI 会回坏图。见 角色参考.js */
-    const blocked = (n) => !!(window.DirectorRef && DirectorRef.blocksVibes(n));
+    // V5 官方没有 Vibe（网页端不发，/ai/encode-vibe 也拒绝 V5），V5 下整块跳过
+    const blocked = (n) => Params.isV5(n.model) || !!(window.DirectorRef && DirectorRef.blocksVibes(n));
 
     /** 要花的 Anlas（给出图按钮上的预估）：没编码过的每张首次编码 2；一次用超过 4 张，第 5 张起每张图每张参考 +2 */
     function cost(n) {
@@ -308,6 +309,7 @@
     function status(v, d) {
         const n = nai();
         if (!d) return '数据找不到了';
+        if (Params.isV5(n.model)) return 'V5 官方不支持画风参考图，切到 V4.5 / V4 / V3 才会用上';
         if (blocked(n)) return '正在用角色参考（精准参考），这张先不发';
         if (Params.isV3(n.model)) return d.image ? 'V3 直接发原图' : '没带原图，V3 用不了';
         const key = modelKey(n.model), e = findEnc(d, key, v.info);
