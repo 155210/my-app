@@ -113,6 +113,7 @@
         },
         prompts: { system: '' }, // 留空 = 内置规范（见 写词.js）
         autoDraw: true,          // 写完提示词自动出图
+        tags: { hint: true, fix: true }, // 标签库：给 AI 参考标签、写完纠错（见 标签库.js）
     };
 
     /** 合并存储里的设置和默认值（新版本加的字段自动补上） */
@@ -134,6 +135,7 @@
             nai,
             prompts: Object.assign({}, DEFAULTS.prompts, s.prompts),
             autoDraw: s.autoDraw === undefined ? DEFAULTS.autoDraw : !!s.autoDraw,
+            tags: Object.assign({}, DEFAULTS.tags, s.tags),
         };
     }
 

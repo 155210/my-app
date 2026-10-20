@@ -20,6 +20,8 @@ PR 上也会打包，但只放在 Actions 的附件里，不发 Release。
 ├── 测试/网页测试.js            无头浏览器测试（假 AI + 假 NAI），见下
 ├── 测试/备份更新测试.js        设置导出导入、检查更新（假 GitHub 接口）
 ├── 测试/队列测试.js            队列：多张、并发、429 重试、取消、失败重试、重绘
+├── 测试/标签库测试.js          标签库的测试
+├── 工具/做标签库.py            生成 依赖/标签.json（换数据源时才跑）；工具/标签补译.txt 是手动补的中文
 └── src/main/
     ├── java/com/example/nlimage/   从自制AI问答机照搬的外壳
     │   ├── MainActivity.java     WebView 外壳，加载 assets/www/首页.html，JS 桥 AndroidBridge
@@ -45,6 +47,8 @@ PR 上也会打包，但只放在 Actions 的附件里，不发 Release。
         ├── 页面-图库.js          图库页、大图和配方
         ├── 备份.js               设置导出 / 导入（设置页「备份」标签，图库不进备份）
         ├── 更新.js               检查更新：查 Releases 里最新 shengtu-N，和本机 1.0.N 比，交给浏览器下载
+        ├── 标签库.js             【标签库】中英对照、搜索、点一下加进提示词；给 AI 参考标签、写完纠错
+        ├── 依赖/标签.json        标签库数据（4 万多个，由 工具/做标签库.py 生成）
         └── 启动.js               启动、底部标签切换
 ```
 
@@ -52,6 +56,8 @@ PR 上也会打包，但只放在 Actions 的附件里，不发 Release。
 
 - `Nai.addHook(fn)`：`fn(parameters, nai设置, 本次提示词)`，出图请求发出前改参数。多角色、Vibe 用它。
 - `Writer.addContext(fn)`：`fn(设置, 中文描述)` 返回一段参考文字，附在发给 AI 的消息后面。角色库、标签库候选用它。
+- `Writer.addFilter(fn)`：`fn(结果, 设置)` 返回改过的结果（`{tag, nl, negative, size}`），AI 回复解析成功后依次执行。标签库纠错用它。
+- `TagLib`：`load()` 读数据，`fix(标签串)` 纠正写法，`canon(一个标签)`，`candidates(中文)` 找候选，`open()` 打开标签库页面。
 - `SettingsPage.addTab({ id, label, html, acts })`：给设置页加一个标签页，表单项写 `data-k="路径"` 自动绑定保存。
 - 新设置字段加在 `参数.js` 的 `DEFAULTS` 里，老用户打开时自动补上。
 - 队列的设置（`nai.concurrency`、`nai.retry429`、`nai.maxRetries`）没进 `DEFAULTS`，默认值在 `队列.js` 的 `CFG_DEFAULTS`。
@@ -76,6 +82,14 @@ PW=/opt/node-tools/node_modules/playwright CHROME=/opt/pw-browsers/chromium-1194
 起本地静态服务、拦截假 AI 和假 NAI 接口，走一遍：设置 → 拉模型 → 写提示词（第一次故意回错格式，测自动重试）→ 自动出图 → 图库大图 → 重开页面数据还在 → 返回键。
 
 `测试/出图参数测试.js`（同样的运行方式）：V3/V4/V5 请求结构、尺寸预设和自定义、画风模板（新建、切换、旧画师串迁移）、快捷栏、锁定种子、Anlas 自动刷新。
+
+## 标签库
+
+数据 `依赖/标签.json`：`{"v":1,"tags":[[英文, 中文, 热度, 类别]...],"alias":{别名: 标签}}`，类别 0 通用 1 画师 3 作品 4 角色 5 元数据，按热度从高到低。
+英文标签和热度来自 NAIWeaver 的 `Tags/high-frequency-tags-list.json`；中文先用 a1111-sd-webui-tagcomplete-CN（人工翻译），再用 BooruTagCart，都没有的通用标签在 `工具/标签补译.txt` 里手动补；角色、作品机翻不好的用 NAIWeaver 别名里的中/日文名；画师不翻译。
+
+- 写提示词前：在中文描述里按最长匹配找标签库的中文词，把「中文=英文」最多 40 个附给 AI（设置 → 标签库 → 第一个开关）
+- AI 写完：逐个标签对照标签库，别名换成正名、单复数/连字符/下划线/大小写统一、去重；带 `:` `{}` `[]` 的权重/画师写法和标签库里没有的原样保留（第二个开关）
 
 ## 本地调试
 
