@@ -17,7 +17,7 @@ const srv = http.createServer((q, s) => {
 // 造一张 64x96 的 PNG（纯色）
 function crc32(buf) { let c, t = []; for (let n = 0; n < 256; n++) { c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } c = 0xffffffff; for (const b of buf) c = t[(c ^ b) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; }
 function chunk(type, data) { const l = Buffer.alloc(4); l.writeUInt32BE(data.length); const td = Buffer.concat([Buffer.from(type), data]); const c = Buffer.alloc(4); c.writeUInt32BE(crc32(td)); return Buffer.concat([l, td, c]); }
-function png(w, h) { const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 2; const raw = Buffer.alloc((w * 3 + 1) * h); for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const o = y * (w * 3 + 1) + 1 + x * 3; raw[o] = 200; raw[o + 1] = 120; raw[o + 2] = 60; } return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]); }
+function png(w, h, texts) { const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 2; const raw = Buffer.alloc((w * 3 + 1) * h); for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const o = y * (w * 3 + 1) + 1 + x * 3; raw[o] = 200; raw[o + 1] = 120; raw[o + 2] = 60; } return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), ...Object.entries(texts || {}).map(([k, v]) => chunk('tEXt', Buffer.concat([Buffer.from(k, 'latin1'), Buffer.from([0]), Buffer.from(v, 'utf8')]))), chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]); }
 function zip(name, data, method) {
   const comp = method === 8 ? zlib.deflateRawSync(data) : data;
   const nm = Buffer.from(name), crc = crc32(data);
@@ -49,8 +49,10 @@ const fails = []; const ok = (c, m) => { if (!c) fails.push(m); console.log((c ?
   await page.route('https://nai.test/**', async (r) => {
     const req = r.request();
     if (req.method() === 'OPTIONS') return r.fulfill({ status: 204, headers: CORS });
-    naiBody = JSON.parse(req.postData());
-    return r.fulfill({ headers: { ...CORS, 'content-type': 'application/x-zip-compressed' }, body: zip('image_0.png', png(64, 96), 8) });
+    const b = JSON.parse(req.postData() || 'null');
+    if (!b || !b.input) return r.fulfill({ headers: { ...CORS, 'content-type': 'application/json' }, body: '{}' });
+    naiBody = b;
+    return r.fulfill({ headers: { ...CORS, 'content-type': 'application/x-zip-compressed' }, body: zip('image_0.png', png(64, 96, { Title: 'NovelAI generated image', Software: 'NovelAI', Source: 'NovelAI Diffusion V4.5 4BDE2A90', Comment: JSON.stringify({ prompt: naiBody.input, uc: naiBody.parameters.negative_prompt, seed: 4242, steps: 28, scale: 5.5, sampler: 'k_euler', width: 1216, height: 832, v4_prompt: { caption: { base_caption: naiBody.input, char_captions: [{ char_caption: 'girl, 黑发', centers: [] }] } } }) }), 8) });
   });
 
   await page.goto('http://localhost:' + srv.address().port + '/' + encodeURIComponent('首页.html'));
@@ -105,13 +107,157 @@ const fails = []; const ok = (c, m) => { if (!c) fails.push(m); console.log((c ?
   await page.click('#tabbar [data-tab="gallery"]');
   await page.waitForSelector('.thumb');
   ok((await page.$$('.thumb')).length === 1, '图库里有 1 张');
-  await page.click('.thumb');
-  await page.waitForSelector('.viewer img');
-  const recipe = await page.$$eval('pre.recipe', (p) => p.map((x) => x.textContent).join('\n'));
-  ok(recipe.includes('黄昏天台') && recipe.includes('种子') && recipe.includes('1216×832'), '大图页显示完整配方');
+  ok(await page.evaluate(async () => (await Gallery.list())[0].ext) === 'png', '默认不转 JPG，保留 NAI 原 PNG');
+  // 杂色大图：PNG 自动转存 JPG
+  const conv = await page.evaluate(async () => {
+    const c = document.createElement('canvas'); c.width = 320; c.height = 480;
+    const g = c.getContext('2d'), d = g.createImageData(320, 480);
+    for (let i = 0; i < d.data.length; i++) d.data[i] = (i % 4 === 3) ? 255 : (Math.random() * 256) | 0;
+    g.putImageData(d, 0, 0);
+    const png = await new Promise((r) => c.toBlob(r, 'image/png'));
+    await Gallery.setPrefs({ jpg: true });
+    const it = await Gallery.add(png, 'png', { desc: '杂色', tag: 'noise', meta: { positive: 'noise', negative: '', width: 320, height: 480, seed: 1, model: 'nai-diffusion-5-full', sampler: 'k_euler', steps: 28, scale: 5, size: 'portrait', characterPrompts: [{ prompt: 'x' }] } });
+    const blob = await Gallery.getBlob(it.id);
+    await Gallery.setPrefs({ jpg: false });
+    const it2 = await Gallery.add(png, 'png', { desc: '不转', tag: 'raw', meta: {} });
+    await Gallery.remove(it2.id);
+    return { ext: it.ext, orig: it.origExt, type: blob.type, smaller: blob.size < png.size, ext2: it2.ext };
+  });
+  ok(conv.ext === 'jpg' && conv.orig === 'png' && conv.type === 'image/jpeg' && conv.smaller, 'PNG 自动转存成 JPG 且更小');
+  ok(conv.ext2 === 'png', '关掉开关后保留 PNG');
+
+  // 读取图片信息：NAI 的 tEXt Comment
+  const info = await page.evaluate(async () => {
+    const it = (await Gallery.list()).find((x) => x.tag && x.tag.includes('1girl'));
+    return Gallery.readInfo(await Gallery.getBlob(it.id));
+  });
+  ok(info && info.prompt.includes('1girl') && info.negative.endsWith('glasses') && info.params.seed === 4242 && info.source.includes('V4.5') && info.chars[0].prompt === 'girl, 黑发', '读出 PNG 里的 NAI 信息：正负面、种子、模型、角色');
+  // 隐写（透明通道最低位，stealth_pngcomp）
+  const stg = await page.evaluate(async () => {
+    const W = 64, H = 64;
+    const json = JSON.stringify({ Comment: JSON.stringify({ prompt: 'stealth cat', uc: 'bad', seed: 9 }), Software: 'NovelAI' });
+    const gz = new Uint8Array(await new Response(new Blob([new TextEncoder().encode(json)]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer());
+    const bits = [];
+    const push = (b) => { for (let k = 7; k >= 0; k--) bits.push((b >> k) & 1); };
+    [...'stealth_pngcomp'].forEach((ch) => push(ch.charCodeAt(0)));
+    const n = gz.length * 8; for (let k = 31; k >= 0; k--) bits.push((n >>> k) & 1);
+    gz.forEach(push);
+    const c = document.createElement('canvas'); c.width = W; c.height = H;
+    const g = c.getContext('2d'), d = g.createImageData(W, H);
+    for (let i = 0; i < W * H; i++) { const x = Math.floor(i / H), y = i % H, o = (y * W + x) * 4; d.data[o] = 120; d.data[o + 1] = 80; d.data[o + 2] = 200; d.data[o + 3] = 254 | (bits[i] || 0); }
+    g.putImageData(d, 0, 0);
+    const blob = await new Promise((r) => c.toBlob(r, 'image/png'));
+    const a = await Gallery.readInfo(blob);
+    const none = await Gallery.readInfo(await new Promise((r) => { const k = document.createElement('canvas'); k.width = k.height = 32; k.toBlob(r, 'image/png'); }));
+    return { a, none };
+  });
+  ok(stg.a && stg.a.prompt === 'stealth cat' && stg.a.params.seed === 9 && stg.a.from === '隐写', '读出透明通道里隐写的 NAI 信息');
+  ok(stg.none === null, '没信息的图返回空');
+  await page.evaluate(() => GalleryPage.refresh()); await page.waitForTimeout(100);
+  ok((await page.$$('.thumb')).length === 2, '图库里有 2 张');
+
+  // 四档大小
+  for (const [v, cols] of [['s', 4], ['l', 2], ['full', 1], ['m', 3]]) {
+    await page.click('#g-size [data-v="' + v + '"]');
+    await page.waitForSelector('.grid.size-' + v);
+    const n = await page.$eval('.grid', (g) => getComputedStyle(g).gridTemplateColumns.split(' ').length);
+    ok(n === cols, '显示大小「' + v + '」→ 每行 ' + n + ' 张');
+  }
+  ok(await page.evaluate(async () => (await Store.get('galleryPrefs')).size) === 'm', '显示大小记住了');
+
+  // 长按 → 读图片里藏的信息 → 填到创作页
+  const tb2 = await page.$('.thumb:nth-child(2)'); const bb2 = await tb2.boundingBox();
+  await page.mouse.move(bb2.x + 20, bb2.y + 20); await page.mouse.down(); await page.waitForTimeout(650); await page.mouse.up();
+  await page.click('.sheet .menu-item[data-k="read"]');
+  await page.waitForSelector('.sheet pre.recipe');
+  const infoText = await page.$eval('.sheet', (x) => x.textContent);
+  ok(infoText.includes('4242') && infoText.includes('角色 1') && infoText.includes('PNG 文本'), '图片信息页显示种子、角色、来源');
+  await page.waitForTimeout(250); await page.screenshot({ path: OUT + '/图片信息.png' });
+  await page.evaluate(() => { document.querySelector('#c-tag').value = ''; });
+  await page.click('.sheet [data-a="use"]');
+  ok(await page.$eval('#view-create', (v) => !v.hidden) && await page.inputValue('#c-tag') === '1girl, long hair, black hair, smile, looking back, rooftop, sunset' && await page.inputValue('#c-neg') === 'glasses', '填到创作页时去掉了质量词和默认负面词');
+  await page.click('#tabbar [data-tab="gallery"]');
+  await page.waitForSelector('.thumb');
+
+  // 选项里一键转换已有 PNG
+  await page.click('#g-opts');
+  await page.click('#g-conv');
+  await page.click('.dialog [data-yes]');
+  await page.waitForFunction(() => document.querySelector('#g-conv').textContent === '转好了');
+  ok(await page.evaluate(async () => (await Gallery.list()).every((x) => x.ext === 'jpg')), '一键把已有 PNG 全转成 JPG');
+  await page.click('.sheet [data-close]');
+
+  // 缩略图长按弹菜单
+  const tb = await page.$('.thumb[data-id]');
+  const bb = await tb.boundingBox();
+  await page.mouse.move(bb.x + 20, bb.y + 20); await page.mouse.down(); await page.waitForTimeout(650); await page.mouse.up();
+  ok(!!await page.$('.sheet .menu-item[data-k="save"]'), '长按缩略图弹出菜单');
+  await page.evaluate(() => window.__appBack());
+  ok(!await page.$('.viewer'), '长按后不会误开大图');
+
+  // 大图：打开第二张（较早出的那张）
+  await page.click('.thumb:nth-child(2)');
+  await page.waitForSelector('.v-stage img');
+  const count = () => page.$eval('[data-count]', (e) => e.textContent.replace(/\s/g, ''));
+  ok(await count() === '2/2', '大图显示第 2 / 2 张');
+  const st = await (await page.$('.v-stage')).boundingBox();
+  const cx = st.x + st.width / 2, cy = st.y + st.height / 2;
+  // 向右滑 → 上一张
+  await page.mouse.move(cx - 100, cy); await page.mouse.down(); await page.mouse.move(cx, cy, { steps: 5 }); await page.mouse.move(cx + 100, cy, { steps: 5 }); await page.mouse.up();
+  await page.waitForTimeout(450);
+  ok(await count() === '1/2', '右滑换到上一张');
+  await page.keyboard.press('ArrowRight'); await page.waitForTimeout(450);
+  ok(await count() === '2/2', '方向键换到下一张');
+  // 双击放大、再双击还原
+  const scale = () => page.$eval('.v-stage img', (i) => { const m = /scale\(([\d.]+)\)/.exec(i.style.transform); return m ? +m[1] : 1; });
+  await page.mouse.click(cx, cy); await page.waitForTimeout(80); await page.mouse.click(cx, cy);
+  ok(await scale() === 2.5, '双击放大到 2.5 倍');
+  await page.waitForTimeout(400);
+  await page.mouse.click(cx, cy); await page.waitForTimeout(80); await page.mouse.click(cx, cy);
+  ok(await scale() === 1, '再双击还原');
+  // 双指缩放（合成两个触点）
+  await page.waitForTimeout(400);
+  await page.evaluate(([x, y]) => {
+    const s = document.querySelector('.v-stage');
+    const f = (type, id, px) => s.dispatchEvent(new PointerEvent(type, { pointerId: id, clientX: px, clientY: y, bubbles: true, pointerType: 'touch' }));
+    f('pointerdown', 11, x - 40); f('pointerdown', 12, x + 40);
+    for (let k = 1; k <= 10; k++) { f('pointermove', 11, x - 40 - k * 6); f('pointermove', 12, x + 40 + k * 6); }
+    f('pointerup', 11, x - 100); f('pointerup', 12, x + 100);
+  }, [cx, cy]);
+  const s2 = await scale();
+  ok(Math.abs(s2 - 2.5) < 0.05, '双指张开放大（' + s2.toFixed(2) + ' 倍）');
+  ok(await count() === '2/2', '放大时不会误换图');
+  await page.mouse.click(cx, cy); await page.waitForTimeout(80); await page.mouse.click(cx, cy);
+  await page.waitForTimeout(400);
+  // 长按大图 → 菜单
+  await page.mouse.move(cx, cy); await page.mouse.down(); await page.waitForTimeout(700); await page.mouse.up();
+  ok(!!await page.$('.sheet .menu-item[data-k="save"]'), '长按大图弹出保存菜单');
+  await page.click('.sheet .menu-item[data-k="recipe"]');
+  await page.waitForSelector('.sheet pre.recipe');
+  const recipe = await page.$$eval('.sheet pre.recipe', (p) => p.map((x) => x.textContent).join('\n'));
+  ok(recipe.includes('黄昏天台') && recipe.includes('种子') && recipe.includes('1216×832') && recipe.includes('glasses') && recipe.includes('A girl smiles'), '配方里有描述、标签、英文描述、负面、参数');
+  await page.waitForTimeout(300); await page.screenshot({ path: OUT + '/配方.png' });
+  await page.evaluate(() => window.__appBack());
   await page.screenshot({ path: OUT + '/图库大图.png' });
-  await page.click('[data-a="reuse"]');
+  // 其他参数（后面的功能加进 meta 的字段）也显示
+  await page.keyboard.press('ArrowLeft'); await page.waitForTimeout(450);
+  await page.click('[data-a="recipe"]');
+  ok((await page.$$eval('.sheet pre.recipe', (p) => p.map((x) => x.textContent).join('\n'))).includes('characterPrompts'), '配方显示其他参数');
+  await page.evaluate(() => window.__appBack());
+  // 上滑看配方
+  await page.mouse.move(cx, cy + 100); await page.mouse.down(); await page.mouse.move(cx, cy, { steps: 5 }); await page.mouse.move(cx, cy - 100, { steps: 5 }); await page.mouse.up();
+  ok(!!await page.$('.sheet pre.recipe'), '上滑打开配方');
+  await page.evaluate(() => window.__appBack());
+  // 删除当前（杂色那张）→ 自动显示剩下那张
+  await page.click('.viewer [data-a="del"]');
+  await page.click('.dialog [data-yes]');
+  await page.waitForFunction(() => document.querySelector('[data-count]').textContent.replace(/\s/g, '') === '1/1');
+  ok(true, '大图里删除后显示剩下那张');
+  await page.click('.viewer [data-a="reuse"]');
   ok(await page.$eval('#view-create', (v) => !v.hidden), '「用这套重画」回到创作页');
+  await page.screenshot({ path: OUT + '/创作重画.png' });
+  await page.click('#tabbar [data-tab="gallery"]');
+  await page.screenshot({ path: OUT + '/图库.png' });
 
   // 重开页面：设置、草稿、图库都还在
   await page.reload();

@@ -170,10 +170,32 @@ textarea.ta.small { min-height: 56px; }
 .acts.big { justify-content: space-around; margin: 8px 0 12px; }
 
 /* 图库 */
+.g-bar { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; }
+.g-bar .card-sub { flex: 1; margin: 0; }
+.g-bar .seg button { padding: 4px 11px; font-size: 13px; }
 .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
-.thumb { aspect-ratio: 2 / 3; border: 0; padding: 0; border-radius: 8px; overflow: hidden; background: var(--bg3); color: var(--faint); }
-.thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.viewer img { display: block; max-width: 100%; max-height: 70vh; margin: 0 auto; border-radius: 8px; }
+.grid.size-s { grid-template-columns: repeat(4, 1fr); gap: 4px; }
+.grid.size-l { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+.grid.size-full { grid-template-columns: 1fr; gap: 10px; }
+.thumb { aspect-ratio: 2 / 3; border: 0; padding: 0; border-radius: 8px; overflow: hidden; background: var(--bg3); color: var(--faint);
+    -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; }
+.thumb img { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
+.grid.size-full .thumb img { object-fit: contain; }
+
+/* 大图 */
+.viewer { flex: 1; min-height: 0; display: flex; flex-direction: column; padding-bottom: var(--safe-bottom); }
+.v-stage { position: relative; flex: 1; min-height: 0; overflow: hidden; background: #000; touch-action: none;
+    -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; }
+.v-stage img { position: absolute; left: 0; top: 0; width: 100%; height: 100%; object-fit: contain; transform-origin: 0 0; pointer-events: none; }
+.v-tip { text-align: center; font-size: 12px; color: var(--faint); padding: 6px 0 0; }
+.viewer .acts.big { margin: 4px 0 8px; flex-wrap: nowrap; }
+.viewer .acts button { flex-direction: column; height: auto; padding: 4px 6px; gap: 2px; font-size: 12px; }
+.viewer .acts svg { width: 20px; height: 20px; }
+.page.bare .page-head, .page.bare .acts, .page.bare .v-tip { display: none; }
+.menu-item { display: flex; align-items: center; gap: 12px; width: 100%; border: 0; background: none; padding: 12px 6px; border-radius: 10px; text-align: left; font-size: 16px; }
+.menu-item:active { background: var(--bg3); }
+.menu-item.danger { color: var(--danger); }
+.label.row .btn.small { padding: 1px 8px; font-size: 12px; }
 pre.recipe { margin: 0 0 12px; padding: 8px 10px; border-radius: 10px; background: var(--bg2); border: 1px solid var(--line);
     white-space: pre-wrap; word-break: break-word; font-size: 13px; user-select: text; -webkit-user-select: text; }
 
