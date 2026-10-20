@@ -119,7 +119,11 @@ PR 上也会打包，但只放在 Actions 的附件里，不发 Release。
   - 图生图：`action: 'img2img'`，`parameters.image` = 原图按原尺寸（64 的倍数、不超过 314 万像素）转 PNG，`strength`（默认 0.7）、`noise`、`extra_noise_seed` = 种子。提示词可改，照常拼画风、质量词。
   - 局部重绘：手指涂（涂 / 擦 / 笔刷大小 / 撤销 / 清空），遮罩按 8×8 格对齐、黑底白涂；`action: 'infill'`，模型换成 `xxx-inpainting`（V5 Curated 借 `nai-diffusion-4-5-curated-inpainting`，同官网），`strength` 默认 1。
   - 精修：原图放大 1 / 1.5 / 2 倍（不超上限的才给选）再图生图，强度默认 0.5；照原图配方里实际发送的正负面原样发（`i2i.raw`），不套画风参考。V5 多一个 MAX：按原尺寸发 + `upscaled_enhance: true`，服务器放大。
-- 创作页「底图」卡片：从图库挑一张，开着时「出图」就变成图生图（按底图尺寸，竖图/横图不管用），存在 `i2iBase` 键；排队时只记 id（`p.i2iRef`），真出图前才读图。图生图出的图点「重绘」照原底图再来。
+- 编辑页（图生图 / 局部重绘）上面有中文描述框和「AI 写提示词」「AI 重写」，走 `Writer.run`（自定义提示词、角色库、标签库纠错都生效）。局部重绘写的是「涂掉的地方要画成什么」，用重写模式：原图提示词当锚点 + `infillNote` 要求只改涂的那块。编辑页有自己的画风模板下拉（`n.styleId` 只改这次）。
+- 局部重绘贴回原图（`composite`）：NAI 回的整张过了一遍编码解码、遮罩是 8×8 方块，直接用会有一圈硬边、清晰度对不上。所以结果按遮罩（羽化「边缘过渡」像素，`i2i.feather`，-1 = 不处理）贴回原图原尺寸，没涂的地方一个像素不变。
+  原图本身糊时两个可选项（默认关）：「画之前先把整张图变清晰」= 先 `enhanceItem` 精修 1.5 倍再在结果上重绘（整张会变，真人照片不建议）；「画完再整体精修一遍」默认「只融合重画那块周围」（精修结果只按放宽的遮罩贴回，脸等远处不动）。花费按钮上是几步加起来的。
+- 画风模板有内置的「空白（不加任何词）」（`Params.BLANK_STYLE`，`blank: true`）：质量词、负面提示词也不回落到默认，全空。老用户打开时自动补一次（`nai.blankAdded`）。
+- 创作页「底图」卡片：从图库挑一张，开着时「出图」就变成图生图（按底图尺寸，竖图/横图不管用），存在 `i2iBase` 键；「涂要重画的地方」涂了遮罩（存 `i2iMask` 键）就变成局部重绘；排队时只记 id（`p.i2iRef`），真出图前才读图。图生图出的图点「重绘」照原底图再来。
 - 放大：`POST /ai/upscale { image, width, height, scale }`，4 倍超过每边 4096 就 2 倍；官方站走 `api.novelai.net`，不行再试 `image.novelai.net`。
 - 图像工具：`POST /ai/augment-image { req_type, width, height, image, prompt?, defry? }`。换表情 prompt = `表情;;补充`，上色 prompt = 颜色说明，`defry` 0~5（越大越接近原图）。
 - 结果都存进图库，配方 `meta.edit = { kind, label, from, strength, … }`；做完自动打开前后对比（左右拖分界线），`from` 那张还在时大图有「对比原图」。

@@ -46,7 +46,7 @@ const fails = []; const ok = (c, m) => { if (!c) fails.push(m); console.log((c ?
     r.defStyle = base.nai.styleId === 'st_default' && Nai.fullPrompts(base.nai, { tag: 'cat' }).positive.startsWith('0.8::nnmbpx::');
     // 旧版画师串自动搬进模板
     const old = Params.normalize({ nai: { artist: 'artist:foo', styles: [] } });
-    r.migrate = old.nai.styles.length === 1 && old.nai.styles[0].prefix === 'artist:foo' && old.nai.styleId === old.nai.styles[0].id && old.nai.artist === '';
+    r.migrate = old.nai.styles.filter((x) => !x.blank).length === 1 && old.nai.styles[0].prefix === 'artist:foo' && old.nai.styleId === old.nai.styles[0].id && old.nai.artist === '';
     // 前缀 / 后缀 / 负面
     const n = Object.assign({}, base.nai, { styles: [{ id: 's1', name: '平涂', prefix: 'artist:a', suffix: 'flat color', negative: '3d' }], styleId: 's1' });
     const fp = Nai.fullPrompts(n, { tag: 'cat', negative: 'dog' });
@@ -102,10 +102,10 @@ const fails = []; const ok = (c, m) => { if (!c) fails.push(m); console.log((c ?
   await page.waitForSelector('[data-act="style-add"]');
   await page.click('[data-act="style-add"]');
   const cards = await page.$$('.style-card');
-  ok(cards.length === 2, '新建一套模板');
-  await page.fill('[data-k="nai.styles.1.name"]', '厚涂');
-  await page.fill('[data-k="nai.styles.1.prefix"]', 'artist:thick');
-  await page.fill('[data-k="nai.styles.1.negative"]', 'flat');
+  ok(cards.length === 3, '新建一套模板（内置那套 + 空白 + 新的）');
+  await page.fill('[data-k="nai.styles.2.name"]', '厚涂');
+  await page.fill('[data-k="nai.styles.2.prefix"]', 'artist:thick');
+  await page.fill('[data-k="nai.styles.2.negative"]', 'flat');
   await page.screenshot({ path: OUT + '/画风模板.png' });
   await page.click('.page-head [data-close]');
 
@@ -148,7 +148,7 @@ const fails = []; const ok = (c, m) => { if (!c) fails.push(m); console.log((c ?
   await page.waitForFunction(() => !document.querySelector('#anlas-chip').hidden, null, { timeout: 5000 });
   ok(subCalls > before, '启动时查一次 Anlas');
   const kept = await page.evaluate(() => [UI.settings.nai.styles.length, Nai.activeStyle(UI.settings.nai).name, UI.settings.nai.landscapeSize]);
-  ok(kept[0] === 2 && kept[1] === '厚涂' && kept[2] === '1280×768', '重开后模板和尺寸还在');
+  ok(kept[0] === 3 && kept[1] === '厚涂' && kept[2] === '1280×768', '重开后模板和尺寸还在');
 
   ok(u.bound, '画风模板绑定的质量词、负面提示词优先，留空跟 NAI 出图页');
   await browser.close(); srv.close();
