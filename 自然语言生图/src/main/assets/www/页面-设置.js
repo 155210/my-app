@@ -28,6 +28,16 @@
     const select = (label, k, list, help) => '<div class="field"><label>' + esc(label) + '</label><select data-k="' + k + '">'
         + list.map((x) => '<option value="' + esc(x.value) + '">' + esc(x.label) + '</option>').join('') + '</select>'
         + (help ? '<div class="help">' + help + '</div>' : '') + '</div>';
+    /** 尺寸：预设下拉 + 自定义 */
+    function sizeField(label, key) {
+        const v = UI.settings.nai[key];
+        const preset = Params.SIZES.some((x) => x.value === v);
+        return '<div class="field"><label>' + esc(label) + '</label><select data-size="' + key + '">'
+            + Params.SIZES.map((x) => '<option value="' + esc(x.value) + '"' + (x.value === v ? ' selected' : '') + '>' + esc(x.label) + '</option>').join('')
+            + '<option value=""' + (preset ? '' : ' selected') + '>自定义…</option></select>'
+            + '<input type="text" data-k="nai.' + key + '" placeholder="宽×高，64 的倍数" style="margin-top:6px"' + (preset ? ' hidden' : '') + '></div>';
+    }
+
     const check = (label, k, help) => '<label class="check"><span class="switch"><input type="checkbox" data-k="' + k + '"><span></span></span><span>' + esc(label)
         + (help ? '<div class="help">' + help + '</div>' : '') + '</span></label>';
 
@@ -48,20 +58,25 @@
         return text('NAI 地址', 'nai.url', { ph: Params.NAI_OFFICIAL, help: '官方填 ' + Params.NAI_OFFICIAL + '；第三方站填它给的地址' })
             + text('NAI Key', 'nai.key', { type: 'password', help: '官方 Key 在 NovelAI 网页 → 设置 → Account → Get Persistent API Token' })
             + '<div class="btns" style="margin-top:-4px;margin-bottom:14px"><button class="btn" data-act="test-nai">测试连接、查 Anlas</button></div>'
-            + select('模型', 'nai.model', Params.MODELS)
+            + select('模型', 'nai.model', Params.MODELS, Params.supportsNl(n.model) ? '' : '这个模型只认英文标签，不发英文画面描述')
             + '<div class="grid2">'
-            + select('采样器', 'nai.sampler', Params.SAMPLERS)
+            + select('采样器', 'nai.sampler', Params.samplersFor(n.model))
             + select('噪声调度', 'nai.noiseSchedule', Params.NOISE)
-            + text('步数', 'nai.steps', { type: 'number' })
+            + text('步数', 'nai.steps', { type: 'number', help: 'Opus 会员 28 步以内不扣 Anlas' })
             + text('CFG（提示词相关度）', 'nai.scale', { type: 'number', step: '0.1' })
-            + text('竖图尺寸', 'nai.portraitSize', { ph: '832×1216' })
-            + text('横图尺寸', 'nai.landscapeSize', { ph: '1216×832' })
-            + text('种子', 'nai.seed', { type: 'number', help: '0 = 每次随机；填数字就固定' })
+            + sizeField('竖图尺寸', 'portraitSize')
+            + sizeField('横图尺寸', 'landscapeSize')
             + text('CFG Rescale', 'nai.cfgRescale', { type: 'number', step: '0.05' })
             + '</div>'
+            + '<div class="field"><label>种子</label><div class="row"><input class="grow" type="number" data-k="nai.seed">'
+            + '<button class="btn" data-act="seed-last">用上一张的</button><button class="btn" data-act="seed-random">随机</button></div>'
+            + '<div class="help">0 = 每次随机；填了数字就锁定，每张都用这个种子（创作页也能一键锁定）</div></div>'
             + check('Variety Boost（画面更多样）', 'nai.varietyBoost', 'V5 不需要，开着也不影响')
             + check('生成英文自然语言描述', 'nai.naturalLanguage', 'NAI 4.5 / V5 能读英文句子。提示词有长度上限，觉得画面怪可以关掉，只用标签')
-            + text('画师串（拼在正面最前面，可留空）', 'nai.artist', { multiline: true, ph: 'artist:xxx, 0.8::artist:yyy::' })
+            + '<div class="field"><label>画风模板（画师串）</label><div class="row"><select class="grow" data-k="nai.styleId">'
+            + '<option value="">不用模板</option>' + n.styles.map((x) => '<option value="' + esc(x.id) + '">' + esc(x.name || '未命名') + '</option>').join('')
+            + '</select><button class="btn" data-act="styles">管理</button></div>'
+            + '<div class="help">模板里存前缀（画师串）、后缀、负面词，创作页也能下拉切换</div></div>'
             + '<div class="field"><label>质量词（拼在正面最后）</label><textarea class="ta" data-k="nai.quality" placeholder="' + esc(Params.QUALITY[n.model] || '') + '"></textarea>'
             + '<div class="help">留空 = 用模型默认（灰字就是默认值）。<a href="#" data-act="reset-q">恢复默认</a></div></div>'
             + '<div class="field"><label>负面词</label><textarea class="ta" data-k="nai.negative" placeholder="' + esc(Params.NEGATIVE[n.model] || '') + '"></textarea>'
@@ -101,6 +116,11 @@
                 if (el.dataset.k === 'nai.model') render(L); // 默认质量词/负面词跟着模型变
             });
         });
+        $$('[data-size]', body).forEach((el) => el.addEventListener('change', () => {
+            const input = el.nextElementSibling;
+            input.hidden = !!el.value;
+            if (el.value) set('nai.' + el.dataset.size, el.value); else input.focus();
+        }));
         $$('[data-act]', body).forEach((b) => b.addEventListener('click', (e) => { e.preventDefault(); act(b.dataset.act, b, L); }));
     }
 
@@ -130,6 +150,11 @@
             try { toast('success', await Nai.test(s.nai)); } catch (e) { toast('error', e.message || String(e)); } finally { btn.disabled = false; }
         } else if (a === 'reset-q') { set('nai.quality', ''); render(L); }
         else if (a === 'reset-n') { set('nai.negative', ''); render(L); }
+        else if (a === 'seed-last') {
+            if (!Nai.state.lastSeed) { toast('info', '这次打开还没出过图'); return; }
+            set('nai.seed', Nai.state.lastSeed); render(L);
+        } else if (a === 'seed-random') { set('nai.seed', 1 + Math.floor(Math.random() * (2 ** 32 - 1))); render(L); }
+        else if (a === 'styles') { tab = 'style'; render(L); }
         else if (a === 'fill-spec') { set('prompts.system', Writer.DEFAULT_SPEC); render(L); }
         else if (a === 'reset-spec') {
             if (await UI.confirmBox('恢复内置规范？', '你改过的规范会被清掉。', '恢复', true)) { set('prompts.system', ''); render(L); }
