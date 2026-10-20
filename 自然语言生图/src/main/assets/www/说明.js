@@ -19,7 +19,7 @@
     'use strict';
 
     const { $, $$, esc } = UI;
-    const GROUPS = ['开始之前', '创作页', '批量页', '图库', '出图队列', '设置', '其他'];
+    const GROUPS = ['开始之前', '创作页', '批量页', '图库', '图生图与编辑', '出图队列', '设置', '其他'];
     const list = [];
     let state = { off: false, seen: [] };
     let loaded = false;
