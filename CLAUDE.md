@@ -9,6 +9,7 @@
 | `translator/` | 小说翻译（原生 Java 版） | `.github/workflows/translator.yml` |
 | `toolbox/` | 自制ai工具箱（WebView 包装的小说/世界书工具） | `.github/workflows/toolbox.yml` |
 | `自制AI问答机/` | 自制AI问答机（纯净提问窗口，导入酒馆预设、自定义 API） | `.github/workflows/自制AI问答机.yml` |
+| `自然语言生图/` | 自然语言生图（中文描述 → AI 写正负面提示词 → NovelAI 出图） | `.github/workflows/自然语言生图.yml` |
 
-改哪个 App 就只看哪个目录。改 toolbox 前先读 `toolbox/README.md`（结构、桥接口、对原插件的改动），改自制AI问答机前先读 `自制AI问答机/README.md`，再只打开要改的文件。
+改哪个 App 就只看哪个目录。改 toolbox 前先读 `toolbox/README.md`（结构、桥接口、对原插件的改动），改自制AI问答机前先读 `自制AI问答机/README.md`，改自然语言生图前先读 `自然语言生图/README.md`，再只打开要改的文件。
 本地没有 Android SDK，验证靠推送后看 Actions 结果；toolbox 的网页层可以用无头浏览器单独测。

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 108x108 自适应图标前景：画框 + 山 + 星光 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- 画框 -->
+    <path android:fillColor="#FFE2A65B"
+        android:pathData="M34,32 L74,32 C78.4,32 82,35.6 82,40 L82,68 C82,72.4 78.4,76 74,76 L34,76 C29.6,76 26,72.4 26,68 L26,40 C26,35.6 29.6,32 34,32 Z" />
+    <!-- 山 -->
+    <path android:fillColor="#FF1E2128"
+        android:pathData="M31,70 L46,52 L56,63 L62,57 L77,70 Z" />
+    <!-- 星光 -->
+    <path android:fillColor="#FF1E2128"
+        android:pathData="M66,38 L68,44 L74,46 L68,48 L66,54 L64,48 L58,46 L64,44 Z" />
+</vector>
