@@ -91,28 +91,45 @@
         return list.filter((c) => c.name && namesOf(c).some((n) => s.includes(lower(n))));
     }
 
+    // 人数标签：1girl / 2girls / 1boy / 3people / multiple girls …
+    const COUNT_RE = /^(\d+\+?\s*(girls?|boys?|others?|people)|multiple (girls|boys)|solo)$/i;
+    function countTags(sexes) {
+        const n = { girl: 0, boy: 0 }, other = [];
+        sexes.forEach((s) => {
+            const m = s.match(/^1\s*(girl|boy)$/i);
+            if (m) n[m[1].toLowerCase()]++; else other.push(s);
+        });
+        const one = (k) => (n[k] === 1 ? '1' + k : n[k] >= 6 ? '6+' + k + 's' : n[k] + k + 's');
+        return ['girl', 'boy'].filter((k) => n[k]).map(one).concat(other);
+    }
+
     /**
      * 把逗号分隔的提示词里「整个就是一个角色名」的那一项换成外貌标签，换完去重
+     * 人数：提示词里本来就有人数标签就不加角色的性别；没有就按角色算（两个 1girl → 2girls），放在最前面
      * 返回 { text, used: [角色名] }
      */
     function expandDetail(text) {
         const used = [];
         if (!list.length || !String(text || '').trim()) return { text: text || '', used };
-        const out = [], seen = new Set();
+        const parts = String(text).split(/[,，\n]/).map((x) => x.trim()).filter(Boolean);
+        const hasCount = parts.some((t) => COUNT_RE.test(t));
+        const out = [], seen = new Set(), sexes = [];
         const push = (t) => { const k = lower(t); if (!k || seen.has(k)) return; seen.add(k); out.push(t); };
         let hit = false;
-        for (const raw of String(text).split(/[,，\n]/)) {
-            const t = raw.trim();
-            if (!t) continue;
+        for (const t of parts) {
             const c = find(t);
             const tags = c && tagsOf(c);
-            if (tags) {
-                hit = true;
-                if (!used.includes(c.name)) used.push(c.name);
-                tags.split(/\s*,\s*/).forEach(push);
-            } else push(t);
+            if (!tags) { push(t); continue; }
+            hit = true;
+            if (!used.includes(c.name)) {
+                used.push(c.name);
+                c.fields.sex.split(/\s*,\s*/).filter(Boolean).forEach((x) => sexes.push(x));
+            }
+            tagsOf(Object.assign({}, c, { fields: Object.assign({}, c.fields, { sex: '' }) })).split(/\s*,\s*/).forEach(push);
         }
-        return { text: hit ? out.join(', ') : text, used };
+        if (!hit) return { text, used };
+        const head = hasCount ? [] : countTags(sexes).filter((x) => !seen.has(lower(x)));
+        return { text: head.concat(out).join(', '), used };
     }
     const expand = (text) => expandDetail(text).text;
 
@@ -248,12 +265,13 @@
     // 出图前：正面提示词里的角色名换成外貌（手写的提示词也生效）
     if (Nai.addTagFilter) Nai.addTagFilter((tag) => expand(tag));
     // 多角色的每个角色提示词也换；等别的扩展都注册完再挂，保证在它们后面执行
-    setTimeout(() => Nai.addHook((params) => {
+    function expandParams(params) {
         const cap = params.v4_prompt && params.v4_prompt.caption;
-        if (!cap || !Array.isArray(cap.char_captions)) return;
-        cap.char_captions.forEach((x) => { if (x && typeof x.char_caption === 'string') x.char_caption = expand(x.char_caption); });
+        if (cap && Array.isArray(cap.char_captions)) cap.char_captions.forEach((x) => { if (x && typeof x.char_caption === 'string') x.char_caption = expand(x.char_caption); });
         if (Array.isArray(params.characterPrompts)) params.characterPrompts.forEach((x) => { if (x && typeof x.prompt === 'string') x.prompt = expand(x.prompt); });
-    }), 0);
+        return params;
+    }
+    setTimeout(() => Nai.addHook(expandParams), 0);
 
     // ------------------------------------------------------------
     // 界面
@@ -414,7 +432,7 @@
     });
 
     window.CharLib = {
-        ready, open, edit, find, mentioned, tagsOf, expand, expandDetail, parseChanges, applyChanges, contextText, create, remove, undo,
+        ready, open, edit, find, mentioned, tagsOf, expand, expandDetail, expandParams, parseChanges, applyChanges, contextText, create, remove, undo,
         FIELDS, get list() { return list; },
     };
 })();
