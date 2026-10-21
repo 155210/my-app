@@ -126,6 +126,7 @@
         const push = (arr, t) => { if (!seen.has(t[0])) { seen.add(t[0]); arr.push(t); } };
         const al = !zh && alias[k] && byName.get(alias[k]);
         if (al) push(a, al);
+        if (zh) extraZh().forEach((t) => { if (t[1].startsWith(raw)) push(a, t); else if (t[1].includes(raw)) push(c, t); });
         for (const t of tags) {
             if (zh) {
                 if (!t[1]) continue;
@@ -136,6 +137,29 @@
             if (a.length >= n) break;
         }
         return a.concat(b, c).slice(0, n);
+    }
+
+    /**
+     * 标签库以外的中文名，联想时也认：图库给人物 / 作品起的中文名（AI 翻的、长按改的，GalleryChars）、
+     * 角色库里填了同人身份标签的角色（名字、别名 → 那个标签）。返回 [英文, 中文, 热度, 类别]
+     */
+    function extraZh() {
+        const out = [];
+        const zm = window.GalleryChars && GalleryChars.zhAll ? GalleryChars.zhAll() : {};
+        for (const en of Object.keys(zm)) {
+            const zh = zm[en] && zm[en].zh;
+            if (!zh) continue;
+            const t = byName.get(en);
+            out.push([en, zh, t ? t[2] : 0, t ? t[3] : 4]);
+        }
+        const lib = window.CharLib && CharLib.list || [];
+        for (const ch of lib) {
+            const en = norm(ch.fields && ch.fields.fandom);
+            if (!en || en.includes(',')) continue;
+            [ch.name].concat(String(ch.alias || '').split(/[,，、\n]/)).map((x) => String(x || '').trim()).filter((x) => /[\u4e00-\u9fff]/.test(x))
+                .forEach((zh) => out.push([en, zh, 0, 4]));
+        }
+        return out;
     }
 
     /** 一个标签换成标签库里的写法；认不出返回 null */

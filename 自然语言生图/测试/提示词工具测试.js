@@ -193,6 +193,15 @@ const fails = []; const ok = (c, m) => { if (!c) fails.push(m); console.log((c ?
   ok(await page.evaluate(() => !document.querySelector('#t-hair').previousElementSibling || !document.querySelector('#t-hair').previousElementSibling.classList.contains('pe-back')), '单行框不垫高亮层');
   ok(await page.evaluate(() => ['input[data-ps="customPose"]', 'input[data-ws]', 'textarea[data-f="negative"]', 'input[type="text"][data-p]'].every((q) => { const d = document.createElement('div'); d.innerHTML = q.startsWith('textarea') ? '<textarea data-f="negative"></textarea>' : q.includes('data-ps') ? '<input data-ps="customPose">' : q.includes('data-ws') ? '<input data-ws="top">' : '<input type="text" data-p>'; return d.firstChild.matches(PromptEdit.SEL); })), '写真、衣柜、表情上色、图生图的格子都在名单里');
   await page.evaluate(() => document.querySelector('#t-hair').closest('.row').remove());
+  // 图库里给人物起的中文名、角色库角色名也能联想
+  await page.evaluate(() => GalleryChars.setZh('yukimi test (some game)', '雪见测试', 'me'));
+  await page.focus('#c-tag');
+  await page.evaluate(() => { document.querySelector('#c-tag').value = ''; });
+  await page.keyboard.type('雪见');
+  await page.waitForSelector('.pe-strip:not([hidden]) button[data-t="yukimi test (some game)"]');
+  await page.click('.pe-strip button[data-t="yukimi test (some game)"]');
+  ok((await page.$eval('#c-tag', (e) => e.value)) === 'yukimi test (some game), ', '图库里起的中文名「雪见测试」能联想，选完变成英文标签');
+  ok(await page.evaluate(() => { CharLib.list.push({ id: 'tmp', name: '阿凛', alias: '凛酱', fields: { fandom: 'tohsaka rin' } }); const r = TagLib.suggest('凛酱', 5).some((x) => x[0] === 'tohsaka rin'); CharLib.list.pop(); return r; }), '角色库角色的名字、别名联想到它的同人身份标签');
 
   // 设置页：通配符、开关
   await page.click('#btn-settings');

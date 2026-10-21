@@ -175,5 +175,5 @@
         return n;
     }
 
-    window.GalleryChars = { index, chips, matches, detect, normTag, setZh, zhOf, translate, isMine: mine };
+    window.GalleryChars = { index, chips, matches, detect, normTag, setZh, zhOf, translate, isMine: mine, zhAll: () => zhMap };
 })();
