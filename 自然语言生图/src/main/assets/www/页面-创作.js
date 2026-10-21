@@ -56,6 +56,8 @@
             + '<button class="btn primary" id="c-draw">出图</button></div>'
             + '<div class="row" style="margin-top:8px"><label for="c-album" style="font-size:13px;color:var(--dim);flex-shrink:0">出的图打上标签</label>'
             + '<select id="c-album" class="grow" style="width:auto;min-width:0;padding:6px 4px" aria-label="这次出的图放进哪个标签"><option value="">不加</option></select></div>'
+            + '<label class="check" style="margin:6px 0 0"><span class="switch"><input type="checkbox" id="c-album-model"><span></span></span>'
+            + '<span style="font-size:13px;color:var(--dim)">跟着模型换（每个模型记自己的标签）</span></label>'
             + '<div class="row" style="margin-top:8px"><div class="card-sub grow" id="c-status" style="margin:0"></div>'
             + '<button class="btn small" id="c-queue" hidden>队列</button><button class="btn small danger" id="c-cancel" hidden>全部取消</button></div>'
             + '</div>'
@@ -78,21 +80,32 @@
     }
 
     // 「出的图打上标签」：就是图库的相册，选了一直记着，出的每张图都放进去，到图库点这个标签就能全选删掉
+    // 打开「跟着模型换」时每个模型一个：draft.modelAlbums = { 模型: 相册 id }，切模型就换成那个模型的
+    const curAlbum = (model) => (draft.albumByModel ? (draft.modelAlbums || {})[model || UI.settings.nai.model] : draft.album) || '';
+    function setAlbum(id) {
+        if (draft.albumByModel) draft.modelAlbums = Object.assign({}, draft.modelAlbums, { [UI.settings.nai.model]: id });
+        else draft.album = id;
+    }
     async function fillAlbums() {
         const sel = root() && $('#c-album', root());
         if (!sel) return;
         const list = await Gallery.albums();
-        if (draft.album && !list.some((a) => a.id === draft.album)) { draft.album = ''; saveDraft(); }
+        const has = (id) => list.some((a) => a.id === id);
+        let gone = false;
+        if (draft.album && !has(draft.album)) { draft.album = ''; gone = true; }
+        for (const m in draft.modelAlbums || {}) if (!has(draft.modelAlbums[m])) { delete draft.modelAlbums[m]; gone = true; }
+        if (gone) saveDraft();
+        $('#c-album-model', root()).checked = !!draft.albumByModel;
         sel.innerHTML = '<option value="">不加</option>'
             + list.map((a) => '<option value="' + esc(a.id) + '">' + esc(a.name) + '</option>').join('')
             + '<option value="+">＋ 新标签…</option>';
-        sel.value = draft.album || '';
+        sel.value = curAlbum();
     }
     async function pickAlbum(v) {
         if (v === '+') {
             const a = window.GalleryPage && GalleryPage.newAlbum ? await GalleryPage.newAlbum('新标签', '比如：4.5底图、待删') : null;
-            if (a) { draft.album = a.id; toast('success', '之后出的图都会放进「' + a.name + '」'); }
-        } else draft.album = v;
+            if (a) { setAlbum(a.id); toast('success', '之后' + (draft.albumByModel ? '用这个模型' : '') + '出的图都会放进「' + a.name + '」'); }
+        } else setAlbum(v);
         saveDraft();
         fillAlbums();
     }
@@ -103,6 +116,7 @@
         const r = root();
         if (!r || !$('#c-tag', r)) return;
         $('#c-nl-wrap', r).hidden = !nlVisible();
+        if (draft.albumByModel && $('#c-album', r).value !== curAlbum()) $('#c-album', r).value = curAlbum(); // 切了模型
         // 「生成英文描述」开关（同设置里那个）；V4 / V3 不吃英文句子，开关灰掉
         const nlOk = Params.supportsNl(UI.settings.nai.model);
         $('#c-nlsw', r).checked = !!UI.settings.nai.naturalLanguage && nlOk;
@@ -155,6 +169,14 @@
         on('#c-write', 'click', () => (writing ? writing.abort() : write()));
         on('#c-count', 'change', (e) => { draft.count = Number(e.target.value) || 1; saveDraft(); });
         on('#c-album', 'change', (e) => pickAlbum(e.target.value));
+        on('#c-album-model', 'change', (e) => {
+            const now = curAlbum();
+            draft.albumByModel = e.target.checked;
+            // 打开时当前模型接着用现在选的；关掉时留下当前显示的那个
+            if (draft.albumByModel) { if (!(UI.settings.nai.model in (draft.modelAlbums || {}))) setAlbum(now); } else draft.album = now;
+            if (draft.albumByModel) toast('info', '每个模型记自己的标签：在这个模型下选好，切到别的模型再选一个，之后切模型会自动换');
+            saveDraft(); fillAlbums();
+        });
         document.addEventListener('gallery-albums', fillAlbums); // 图库里新建 / 改名 / 删了相册
         on('#c-draw', 'click', () => CreatePage.draw()); // 走 CreatePage 上的，别的文件（底图）能包一层
         on('#c-queue', 'click', () => Queue.openPanel());
@@ -247,7 +269,7 @@
         // 先校验尺寸等，免得排进队才报错
         try { Nai.buildBody(UI.settings.nai, p); } catch (e) { toast('error', e.message); return null; }
         const nai = Object.assign({}, UI.settings.nai); // 排队期间改设置不影响这批
-        if (p.album == null && draft.album) p = Object.assign({}, p, { album: draft.album }); // 标签也按排队那一刻的
+        if (p.album == null && curAlbum(nai.model)) p = Object.assign({}, p, { album: curAlbum(nai.model) }); // 标签也按排队那一刻的
         const locked = Number(nai.seed) > 0 ? Number(nai.seed) : 0;
         const name = p.label || String(p.desc || p.tag).trim().replace(/\s+/g, ' ').slice(0, 24);
         const jobs = [];
