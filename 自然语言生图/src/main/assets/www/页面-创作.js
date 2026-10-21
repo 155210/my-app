@@ -54,6 +54,8 @@
             + '<button class="btn" id="c-preview">实际发送</button>'
             + '<select id="c-count" style="width:auto;padding:8px 4px" aria-label="一次出几张">' + [1, 2, 3, 4].map((v) => '<option value="' + v + '">' + v + ' 张</option>').join('') + '</select>'
             + '<button class="btn primary" id="c-draw">出图</button></div>'
+            + '<div class="row" style="margin-top:8px"><label for="c-album" style="font-size:13px;color:var(--dim);flex-shrink:0">出的图打上标签</label>'
+            + '<select id="c-album" class="grow" style="width:auto;min-width:0;padding:6px 4px" aria-label="这次出的图放进哪个标签"><option value="">不加</option></select></div>'
             + '<div class="row" style="margin-top:8px"><div class="card-sub grow" id="c-status" style="margin:0"></div>'
             + '<button class="btn small" id="c-queue" hidden>队列</button><button class="btn small danger" id="c-cancel" hidden>全部取消</button></div>'
             + '</div>'
@@ -71,7 +73,28 @@
         $('#c-auto', r).checked = UI.settings.autoDraw;
         $('#c-count', r).value = String(draft.count || 1);
         $('#c-plan', r).value = draft.plan || '';
+        fillAlbums();
         refresh();
+    }
+
+    // 「出的图打上标签」：就是图库的相册，选了一直记着，出的每张图都放进去，到图库点这个标签就能全选删掉
+    async function fillAlbums() {
+        const sel = root() && $('#c-album', root());
+        if (!sel) return;
+        const list = await Gallery.albums();
+        if (draft.album && !list.some((a) => a.id === draft.album)) { draft.album = ''; saveDraft(); }
+        sel.innerHTML = '<option value="">不加</option>'
+            + list.map((a) => '<option value="' + esc(a.id) + '">' + esc(a.name) + '</option>').join('')
+            + '<option value="+">＋ 新标签…</option>';
+        sel.value = draft.album || '';
+    }
+    async function pickAlbum(v) {
+        if (v === '+') {
+            const a = window.GalleryPage && GalleryPage.newAlbum ? await GalleryPage.newAlbum('新标签', '比如：4.5底图、待删') : null;
+            if (a) { draft.album = a.id; toast('success', '之后出的图都会放进「' + a.name + '」'); }
+        } else draft.album = v;
+        saveDraft();
+        fillAlbums();
     }
 
     let refilling = false;
@@ -131,6 +154,8 @@
         });
         on('#c-write', 'click', () => (writing ? writing.abort() : write()));
         on('#c-count', 'change', (e) => { draft.count = Number(e.target.value) || 1; saveDraft(); });
+        on('#c-album', 'change', (e) => pickAlbum(e.target.value));
+        document.addEventListener('gallery-albums', fillAlbums); // 图库里新建 / 改名 / 删了相册
         on('#c-draw', 'click', () => CreatePage.draw()); // 走 CreatePage 上的，别的文件（底图）能包一层
         on('#c-queue', 'click', () => Queue.openPanel());
         on('#c-cancel', 'click', () => Queue.cancelAll());
@@ -222,6 +247,7 @@
         // 先校验尺寸等，免得排进队才报错
         try { Nai.buildBody(UI.settings.nai, p); } catch (e) { toast('error', e.message); return null; }
         const nai = Object.assign({}, UI.settings.nai); // 排队期间改设置不影响这批
+        if (p.album == null && draft.album) p = Object.assign({}, p, { album: draft.album }); // 标签也按排队那一刻的
         const locked = Number(nai.seed) > 0 ? Number(nai.seed) : 0;
         const name = p.label || String(p.desc || p.tag).trim().replace(/\s+/g, ' ').slice(0, 24);
         const jobs = [];
@@ -237,9 +263,9 @@
     function enqueue(nai, p, label) {
         const job = Queue.add(async (signal) => {
             const out = await Nai.generate(nai, p, signal);
-            return Gallery.add(out.blob, out.ext, {
-                desc: p.desc || '', tag: p.tag, nl: p.nl || '', extraNegative: p.negative || '', meta: out.meta,
-            });
+            const info = { desc: p.desc || '', tag: p.tag, nl: p.nl || '', extraNegative: p.negative || '', meta: out.meta };
+            if (p.album && (await Gallery.albums()).some((a) => a.id === p.album)) info.albums = [p.album];
+            return Gallery.add(out.blob, out.ext, info);
         }, {
             label,
             // 失败后在队列里点「重试」：同一套提示词、同一个种子（如果原来指定了）再排一次

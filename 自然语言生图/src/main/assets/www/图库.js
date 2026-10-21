@@ -255,6 +255,7 @@
     // 收藏、相册、排序
     // ------------------------------------------------------------
     let albumList = null;
+    const albumsChanged = () => document.dispatchEvent(new Event('gallery-albums')); // 创作页的「打上标签」跟着更新
     async function albums() {
         if (!albumList) albumList = await Store.get('galleryAlbums', []);
         return albumList;
@@ -266,6 +267,7 @@
         const a = { id: 'a' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), name };
         list.push(a);
         await Store.set('galleryAlbums', list);
+        albumsChanged();
         return a;
     }
     async function renameAlbum(id, name) {
@@ -273,6 +275,7 @@
         if (!a || !String(name || '').trim()) return;
         a.name = String(name).trim();
         await Store.set('galleryAlbums', albumList);
+        albumsChanged();
     }
     /** 删相册：图不删，只是不再属于它 */
     async function removeAlbum(id) {
@@ -281,6 +284,7 @@
         const items = await list();
         items.forEach((x) => { if (x.albums) { x.albums = x.albums.filter((a) => a !== id); if (!x.albums.length) delete x.albums; } });
         await Store.set('gallery', items);
+        albumsChanged();
     }
     /** 批量改：fav 收藏（true/false），或者 album + on 加进 / 移出相册 */
     async function mark(ids, patch) {
