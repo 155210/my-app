@@ -71,6 +71,40 @@ const galleryLen = async (n) => (await Gallery.list()).length === n; const ok = 
   await page.waitForFunction(() => [...document.querySelectorAll('#c-album option')].some((o) => o.textContent === '壁纸'));
   ok(await page.$eval('#c-album', (s) => s.selectedOptions[0].textContent) === '4.5底图', '图库新建相册后下拉更新，选的不变');
 
+  // ---------- 跟着模型换 ----------
+  const label = () => page.$eval('#c-album', (s) => s.selectedOptions[0].textContent);
+  await page.selectOption('[data-q="model"]', 'nai-diffusion-4-5-full');
+  await page.waitForTimeout(100);
+  ok(await label() === '4.5底图', '没勾「跟着模型」：切模型标签不变');
+  await page.click('label:has(#c-album-model) .switch');
+  await page.waitForTimeout(100);
+  ok(await label() === '4.5底图', '勾上后当前模型（4.5）接着用「4.5底图」');
+  await page.selectOption('[data-q="model"]', 'nai-diffusion-5-full');
+  await page.waitForFunction(() => document.querySelector('#c-album').value === '');
+  ok(true, '切到 V5：还没选过，显示「不加」');
+  await page.selectOption('#c-album', { label: '壁纸' });
+  await page.selectOption('#c-count', '1');
+  await page.waitForTimeout(100);
+  await page.click('#c-draw');
+  await until(page, galleryLen, 4);
+  ok(await page.evaluate(async () => { const a = (await Gallery.albums()).find((x) => x.name === '壁纸'); return ((await Gallery.list())[0].albums || []).join() === a.id; }), 'V5 出的图进了「壁纸」');
+  await page.selectOption('[data-q="model"]', 'nai-diffusion-4-5-full');
+  await page.waitForFunction(() => document.querySelector('#c-album').selectedOptions[0].textContent === '4.5底图');
+  ok(true, '切回 4.5 自动换回「4.5底图」');
+  await page.waitForTimeout(400);
+  await page.reload();
+  await page.waitForSelector('#c-album');
+  await page.waitForFunction(() => document.querySelector('#c-album').selectedOptions[0].textContent === '4.5底图' && document.querySelector('#c-album-model').checked);
+  await page.selectOption('[data-q="model"]', 'nai-diffusion-5-full');
+  await page.waitForFunction(() => document.querySelector('#c-album').selectedOptions[0].textContent === '壁纸');
+  ok(true, '重开 App 勾选和每个模型的标签都还在');
+  await page.click('label:has(#c-album-model) .switch');
+  await page.selectOption('[data-q="model"]', 'nai-diffusion-4-5-full');
+  await page.waitForTimeout(100);
+  ok(await label() === '壁纸', '取消勾选：留下当前那个，切模型不再变');
+  await page.selectOption('#c-album', { label: '4.5底图' });
+  await page.evaluate(async () => { const l = await Gallery.list(); await Gallery.removeMany([l[0].id]); });
+
   // 图库：点标签 → 全选 → 删除
   await page.click('#tabbar [data-tab="gallery"]');
   await page.waitForSelector('#g-views');
