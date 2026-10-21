@@ -456,11 +456,11 @@
             inp.onkeydown = (e) => { if (e.key === 'Enter') ok(); };
         });
     }
-    async function newAlbum() {
-        const name = await ask('新建相册', '', '比如：小雪、壁纸、待修', '建好');
+    async function newAlbum(title, placeholder) {
+        const name = await ask(title || '新建相册', '', placeholder || '比如：小雪、壁纸、待修', '建好');
         if (!name) return null;
         const a = await Gallery.addAlbum(name);
-        toast('success', '建好了「' + a.name + '」，长按图片就能放进来');
+        if (!title) toast('success', '建好了「' + a.name + '」，长按图片就能放进来');
         return a;
     }
     /** 选一个相册（可以当场新建），返回相册或 null */
@@ -1026,5 +1026,5 @@
         await load(idx);
     }
 
-    window.GalleryPage = { refresh, openViewer, openRecipe, showInfo, startSelect, addViewerAction };
+    window.GalleryPage = { refresh, openViewer, openRecipe, showInfo, startSelect, addViewerAction, newAlbum };
 })();
