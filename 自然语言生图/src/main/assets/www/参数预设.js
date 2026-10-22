@@ -30,7 +30,8 @@
     }
     const same = (p) => { const s = snapshot(); return JSON.stringify(s.nai) === JSON.stringify(p.nai) && JSON.stringify(s.chars) === JSON.stringify(p.chars); };
 
-    function apply(p) {
+    /** keepCur 给了（多画布切换）：下拉选中它记的那个预设，不改成 p.id */
+    function apply(p, keepCur) {
         const n = UI.settings.nai;
         const want = new Map((p.nai.vibes || []).map((v) => [v.id, v]));
         const wantRef = new Map((p.nai.dirRefs || []).map((v) => [v.id, v]));
@@ -46,7 +47,7 @@
         if (n.styleId && !(n.styles || []).some((x) => x.id === n.styleId)) n.styleId = '';
         UI.saveSettings();
         if (window.Characters) Characters.set(clone(p.chars || []));
-        data.cur = p.id;
+        data.cur = keepCur === undefined ? p.id : (data.list.some((x) => x.id === keepCur) ? keepCur : '');
         save();
         CreatePage.refresh();
         if (window.Vibes) Vibes.render();

@@ -11,7 +11,7 @@
     const { $, toast } = UI;
     const KIND = 'nl-image-settings';
     // 不进备份的键：图库太大，草稿和更新提醒是临时状态
-    const SKIP = (k) => k === 'gallery' || k === 'draft' || k === 'update' || String(k).startsWith('img:');
+    const SKIP = (k) => k === 'gallery' || k === 'draft' || k === 'update' || String(k).startsWith('img:') || String(k).startsWith('tok:');
     let withKeys = false;
 
     function stripKeys(data) {
