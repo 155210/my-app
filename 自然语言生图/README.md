@@ -93,6 +93,8 @@ PR 上也会打包，但只放在 Actions 的附件里，不发 Release。
         ├── 依赖/标签说明.json    标签说明英文原文（2.2 万个，由 工具/做标签说明.py 生成）
         ├── 提示词编辑.js         【提示词格子】联想（中英文、通配符）、− ＋ 调权重、ⓘ 看说明、语法高亮
         ├── 通配符.js             【通配符】__名字__ 出图时随机换一行（设置 tags.wildcards，设置页「通配符」）
+        ├── 多画布.js             【多画布】创作页顶上一排画布：每个存一套草稿 + 出图参数 + 多角色（canvases 键），点一下切换、＋新建、复制、改名、删除
+        ├── token读数.js          【token 读数】负面词下面一行：实际发送的正负面、多角色各占多少 token；官网同款分词器（V5 qwen35 / V4 T5 / V3 CLIP）第一次用到时下载，存 tok:<种类>（不进备份）
         ├── 参数预设.js           【预设】整套 NAI 参数 + 多角色 + 参考图开关强度，创作页顶上下拉切换（presets 键）
         ├── 打码.js               【自动打码】手机上跑 YOLO 认敏感部位（onnxruntime-web），马赛克/模糊/黑条/白光，另存一张；设置页「打码」；出图后自动打码
         ├── 依赖/打码/            模型 + 运行库（不进 git，见下「自动打码」）
@@ -262,6 +264,11 @@ PW=/opt/node-tools/node_modules/playwright CHROME=/opt/pw-browsers/chromium-1194
 - **标签说明**（`标签说明.js`）：`TagWiki.open(标签)`。原文只在 `依赖/标签说明.json`，翻译走设置里的 AI 接口（非流式、温度 0.3），译文存 `wikiZh`，有「重新翻译」。入口：联想条的 ⓘ、标签库每行的 ⓘ。
 - **通配符**（`通配符.js`）：`Wildcards.resolve(文本)`；最多套 5 层。画面标签走 `Nai.addTagFilter`（在角色库换外貌之前），负面和多角色走 `Nai.addHook`，配方里的 `positive` / `negative` 是换好的。
 - **预设**（`参数预设.js`）：存 `nai` 里除 `url`、`key`、`styles` 以外的全部字段（以后加的字段自动带上）、参考图只记 `{id,on,strength,info}`、多角色格子。切换时预设里没有的参考图关掉。和现在不一样时显示「改过」。
+
+## 多画布、token 读数
+
+- **多画布**（`多画布.js`）：`canvases` 键 `{ list: [{ id, name, draft, snap, preset, time }], cur }`。`draft` 是创作页草稿整份（以后加进草稿的字段自动跟着走），`snap` 是 `Presets.snapshot()`（NAI 参数 + 多角色 + 参考图开关），`preset` 是当时预设下拉选的哪个。正在用的画布以创作页现在的样子为准，切走时才 `capture`；切过去用 `CreatePage.setDraft(草稿)` + `Presets.apply(快照, 预设id)`（第二个参数给了就不把预设下拉改成快照）。AI 正在写时不让切。最多 20 个。测试：`测试/画布token测试.js`。
+- **token 读数**（`token读数.js`）：数 `Nai.buildBody` 拼出来的 `meta.positive / negative` 和 `char_captions`，权重写法（`1.2::`、`::`、`{}`、`[]`）先去掉。分词器按模型：V5 → `qwen35_tokenizer.def`（字节级 BPE，`{config.splitRegex, vocab, merges}`），V4/4.5 → `t5_tokenizer.def`（HF tokenizer.json，Unigram，Viterbi），V3 → `clip_tokenizer.def`（`{text: 合并表}`）；地址 `https://novelai.net/tokenizer/compressed/<名>.def?v=2&static=true`（raw deflate，同 novelai-python），T5 / CLIP 下不到再试 hf-mirror / HuggingFace。没下好之前按字数估、显示「约」。上限 V4/4.5 512、V3 225，V5 不显示。`TokenCount.count(文本, 模型)` → `{ n, exact, kind }`。
 
 ## 角色库
 

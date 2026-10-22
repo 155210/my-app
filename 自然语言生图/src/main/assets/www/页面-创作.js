@@ -375,6 +375,14 @@
         if (!quiet) toast('info', '已填回创作页，改完点「出图」');
     }
 
+    /** 整个换掉草稿（多画布切换用）：对象还是同一个，没给的字段回到默认 */
+    function setDraft(d) {
+        Object.keys(draft).forEach((k) => delete draft[k]);
+        Object.assign(draft, { desc: '', tag: '', nl: '', negative: '', size: 'portrait', count: 1, plan: '', hint: '' }, d);
+        saveDraft();
+        fill();
+    }
+
     async function init() {
         draft = Object.assign(draft, await Store.get('draft', {}));
         root().innerHTML = html();
@@ -390,5 +398,5 @@
     });
 
     const addMode = (m) => modes.push(m);
-    window.CreatePage = { init, refresh, reuse, draw, redraw, addMode, get draft() { return draft; }, get busy() { return !!writing; } };
+    window.CreatePage = { init, refresh, reuse, draw, redraw, addMode, setDraft, get draft() { return draft; }, get busy() { return !!writing; } };
 })();
