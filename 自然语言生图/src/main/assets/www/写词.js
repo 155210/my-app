@@ -6,7 +6,7 @@
  *
  * 另外两种写法（照柏宝绘）：
  *   一段描述拆成多张：run({ plan: 张数（0 = AI 自己定 2~6 张） })，AI 回 {"images":[{desc,tag,nl,negative,size}...]}
- *   重写提示词：run({ rewrite: { tag, nl, negative, hint 附加要求 } })，照原来那个画面重写一遍，这次的 changes 不要
+ *   重写提示词：run({ rewrite: { tag, nl, negative, hint 附加要求, history 前几轮对话 } })，照原来那个画面重写一遍，这次的 changes 不要
  */
 (function () {
     'use strict';
@@ -86,6 +86,13 @@
         if (cur.nl) lines.push('nl: ' + cur.nl);
         if (cur.negative) lines.push('negative: ' + cur.negative);
         lines.push('', '这次不用写 changes。');
+        // 对话改词：前几轮的要求和用户没接受的改动（对话改词.js 传进来）
+        const hist = (Array.isArray(cur.history) ? cur.history : []).map((x) => String(x || '').trim()).filter(Boolean);
+        if (hist.length) {
+            lines.push('', '【前几轮的对话（上面当前的提示词已经是按这些改过、用户挑着接受之后的结果）】');
+            hist.forEach((x, i) => lines.push((i + 1) + '. ' + x.slice(0, 300)));
+            lines.push('用户没接受的改动说明他不想要，这轮别再改回去；这轮只按下面的新要求改，没提到的地方尽量不动。');
+        }
         if (hint) {
             lines.push('', '【用户对这次重写的额外要求（优先级最高）】', hint,
                 '按这条要求改写。它和上面「不要换画面」等约束冲突时，以这条要求为准；要求没提到的部分照旧保持原来的画面。');
