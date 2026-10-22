@@ -315,3 +315,19 @@ pre.recipe { margin: 0 0 12px; padding: 8px 10px; border-radius: 10px; backgroun
 .g-cp-q { width: 100%; border: 1px solid var(--line); background: var(--bg); border-radius: 10px; padding: 7px 11px; outline: none; margin-bottom: 4px; }
 .g-cp-q:focus { border-color: var(--accent); }
 .g-cp-body { max-height: 55vh; overflow-y: auto; }
+
+/* 用量统计（用量.js） */
+.u-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 10px 0; }
+.u-stat { display: flex; flex-direction: column; min-width: 0; }
+.u-stat b { font-size: 20px; font-variant-numeric: tabular-nums; }
+.u-stat span { font-size: 12px; color: var(--faint); }
+.u-chart { width: 100%; height: auto; display: block; margin: 6px 0; }
+.u-chart .u-grid { stroke: var(--line); stroke-width: 1; }
+.u-chart .u-axis { fill: var(--faint); font-size: 10px; stroke: none; }
+.u-chart .u-hit { fill: transparent; stroke: none; cursor: pointer; }
+.u-chart .u-fill { fill: var(--accent-soft); stroke: none; }
+.u-chart .u-bar.today .u-fill, .u-chart .u-bar:hover .u-fill { fill: var(--accent); }
+.u-line { display: flex; justify-content: space-between; gap: 10px; padding: 5px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+.u-line span { min-width: 0; overflow-wrap: anywhere; color: var(--dim); }
+.u-line b { white-space: nowrap; font-weight: 500; font-variant-numeric: tabular-nums; }
+.u-items { max-height: 40vh; overflow-y: auto; }
