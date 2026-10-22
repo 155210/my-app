@@ -5,6 +5,9 @@
  *   label：队列面板里显示的一行字；retry：失败后点「重试」时调用（一般是重新 draw 一次）
  * Queue.onChange(fn) 订阅变化，fn({ running, waiting, retrying, failed, wait })
  *   wait = 限流等待中最近一次重试还剩几秒（没有就是 0）
+ *   还有这一轮的进度（通知栏用）：total 这一轮排了几张、done 出好、lost 失败、cancelled 取消、
+ *   writing 正在写提示词的个数、current 正在出的那张的名字
+ * Queue.onFinish(fn) 这一轮全部结束（队列空、也没在写提示词，停 1.5 秒确认）时 fn({ total, done, lost, cancelled })
  * Queue.cancel(id) / Queue.cancelAll() 取消；Queue.openPanel() 打开队列面板
  *
  * 设置放在 settings.nai 里（老设置没有就用 CFG_DEFAULTS），设置页多一个「出图队列」标签页。
@@ -12,7 +15,7 @@
 (function () {
     'use strict';
 
-    const CFG_DEFAULTS = { concurrency: 1, retry429: true, maxRetries: 20 };
+    const CFG_DEFAULTS = { concurrency: 1, retry429: true, maxRetries: 20, doneNotify: true };
     const MAX_FAILED = 20;
 
     function cfg() {
@@ -30,6 +33,9 @@
     const failed = [];    // 失败的，最近的在前
     const subs = [];
     let seq = 0;
+    // 这一轮（从空闲到再次空闲）：批量页是写一条出一条，中间队列会空一下，所以停 1.5 秒才算结束
+    let round = null, roundTimer = 0;
+    const finishSubs = [];
     const bridge = window.AndroidBridge || null;
 
     /** 限流等待：第 n 次重试等 5、10、15… 秒，最多 30 秒 */
@@ -48,6 +54,12 @@
             retrying: retrying.length,
             failed: failed.length,
             wait,
+            total: round ? round.total : 0,
+            done: round ? round.done : 0,
+            lost: round ? round.lost : 0,
+            cancelled: round ? round.cancelled : 0,
+            writing: Busy.count,
+            current: (jobs.find((j) => j.state !== 'waiting') || {}).label || '',
         };
     }
 
@@ -56,6 +68,19 @@
         subs.forEach((f) => { try { f(st); } catch (e) { /* ignore */ } });
         if (bridge && bridge.keepAlive) bridge.keepAlive(jobs.length > 0 || Busy.count > 0);
         if (panel) renderPanel();
+        checkRound();
+    }
+
+    function checkRound() {
+        const idle = !jobs.length && !Busy.count;
+        if (!idle) { clearTimeout(roundTimer); roundTimer = 0; return; }
+        if (!round || roundTimer) return;
+        roundTimer = setTimeout(() => {
+            roundTimer = 0;
+            const r = round;
+            round = null;
+            if (r && r.total) finishSubs.forEach((f) => { try { f(r); } catch (e) { /* ignore */ } });
+        }, 1500);
     }
 
     // 限流等待时每秒刷新一次倒计时
@@ -112,7 +137,8 @@
             if (active >= limit) break;
             if (job.state !== 'waiting') continue;
             active++;
-            runJob(job).then(job.resolve, (e) => {
+            runJob(job).then((v) => { if (round) round.done++; job.resolve(v); }, (e) => {
+                if (round) round[e.name === 'AbortError' ? 'cancelled' : 'lost']++;
                 if (e.name !== 'AbortError') {
                     failed.unshift({ id: job.id, label: job.label, error: e.message || String(e), retry: job.retry });
                     failed.length = Math.min(failed.length, MAX_FAILED);
@@ -133,6 +159,8 @@
 
     function add(fn, info) {
         info = info || {};
+        if (!round) round = { total: 0, done: 0, lost: 0, cancelled: 0 };
+        round.total++;
         return new Promise((resolve, reject) => {
             jobs.push({
                 id: ++seq, fn, resolve, reject, ctrl: new AbortController(),
@@ -149,6 +177,7 @@
         if (!job) return;
         if (job.state === 'waiting') {
             remove(job);
+            if (round) round.cancelled++;
             job.reject(abortErr());
             pump();
         } else {
@@ -232,7 +261,9 @@
             + '<div class="help">官方 NovelAI 一个账号同时只能出 1 张，填大了会被限流（下面开了自动重试就会自己排队等）。第三方站看它的规则。</div></div>'
             + '<label class="check"><span class="switch"><input type="checkbox" data-k="nai.retry429"><span></span></span><span>被限流（429）时自动等待重试'
             + '<div class="help">等 5 秒、10 秒…最多 30 秒再试，期间可以在队列里取消</div></span></label>'
-            + '<div class="field"><label>最多重试几次</label><input type="number" data-k="nai.maxRetries"><div class="help">超过就算失败，可以在队列面板里点「重试」</div></div>';
+            + '<div class="field"><label>最多重试几次</label><input type="number" data-k="nai.maxRetries"><div class="help">超过就算失败，可以在队列面板里点「重试」</div></div>'
+            + '<label class="check"><span class="switch"><input type="checkbox" data-k="nai.doneNotify"><span></span></span><span>出完了在通知栏提醒'
+            + '<div class="help">App 在后台时，一轮图全部出完弹一条「出好了 N 张」；出图中的进度一直显示在通知栏</div></span></label>';
     }
 
     const CSS = '.q-item{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)}'
@@ -253,6 +284,6 @@
 
     window.Queue = {
         add, cancel, cancelAll, refill, retryFailed, clearFailed, openPanel,
-        onChange: (f) => subs.push(f), state, Busy, isRateLimit, CFG_DEFAULTS,
+        onChange: (f) => subs.push(f), onFinish: (f) => finishSubs.push(f), state, Busy, isRateLimit, CFG_DEFAULTS,
     };
 })();

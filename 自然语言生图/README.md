@@ -20,6 +20,7 @@ PR 上也会打包，但只放在 Actions 的附件里，不发 Release。
 ├── 测试/网页测试.js            无头浏览器测试（假 AI + 假 NAI），见下
 ├── 测试/备份更新测试.js        设置导出导入、检查更新（假 GitHub 接口）
 ├── 测试/队列测试.js            队列：多张、并发、429 重试、取消、失败重试、重绘
+├── 测试/通知栏测试.js          通知栏进度：第几张 / 一共几张、排队、限流倒计时、出完提醒、取消、关掉提醒
 ├── 测试/标签库测试.js          标签库的测试
 ├── 测试/角色系统测试.js        衣柜（穿脱、遮挡）、AI 一句话生成角色、写真模式
 ├── 测试/角色库测试.js          角色库：建档、名字换外貌、AI 自动建档/永久变化、全局角色、撤销
@@ -40,7 +41,7 @@ PR 上也会打包，但只放在 Actions 的附件里，不发 Release。
     │   ├── NativeHttp.java       请求代发（无跨域限制、支持 http、流式逐块回传）
     │   ├── ApkUpdater.java     应用内更新：下载新版 APK、调起系统安装（FileProvider）
     │   ├── FileSaver.java        图片按保存位置存：隐藏文件夹 下载/自然语言生图/图片/（带 .nomedia，默认）/ 相册 / 自选文件夹（SAF）；其他文件进 下载/自然语言生图/
-    │   └── KeepAliveService.java 写提示词、出图期间开的前台服务，切后台不断
+    │   └── KeepAliveService.java 写提示词、出图期间开的前台服务，切后台不断；常驻通知显示出图进度、「全部取消」，一轮出完 App 在后台时弹「出好了」
     └── assets/www/
         ├── 首页.html             页面骨架（顶栏 + 创作/图库 两个标签 + 浮层）
         ├── 样式.css
@@ -53,6 +54,7 @@ PR 上也会打包，但只放在 Actions 的附件里，不发 Release。
         ├── 出图.js               【NAI】拼请求 body、解 zip、测试连接查 Anlas；V5 透明背景、Furry 模式
         ├── 计价.js               【Anlas 预估】官网同款算法：出图、图生图、精修、放大、图像工具；按钮上的花费标记
         ├── 队列.js               【队列】并发数可调、429 限流自动等待重试、单张/全部取消、失败重试、队列面板、设置页「出图队列」
+        ├── 通知栏进度.js         【通知栏】订阅 Queue.onChange / onFinish，调外壳 queueProgress / queueDone；设置 nai.doneNotify（出完提醒，默认开）
         ├── 图库.js               【图库数据】存图（可选转 JPG，默认关以保留 NAI 信息）、缩略图、配方、存相册、读图片里的 NAI 信息、图库偏好 galleryPrefs（含排序 sort、文件名规则 nameRule / 计数 nameCounter）、收藏 fav、相册 galleryAlbums（图上只记相册 id，不动文件）
         ├── 工具.js               共用界面小工具（浮层、对话框、列表选择、设置读写）
         ├── 说明.js               【说明】新手提示（按钮第一次出现时弹一句，看过存 guide 键）+ 顶栏「?」功能说明页
@@ -103,6 +105,7 @@ PR 上也会打包，但只放在 Actions 的附件里，不发 Release。
 - 新设置字段加在 `参数.js` 的 `DEFAULTS` 里，老用户打开时自动补上。
 - 队列的设置（`nai.concurrency`、`nai.retry429`、`nai.maxRetries`）没进 `DEFAULTS`，默认值在 `队列.js` 的 `CFG_DEFAULTS`。
 - `Queue.add(fn, { label, retry })`：排一张进队列；`label` 显示在队列面板，`retry` 是失败后点「重试」时调的函数。
+- `Queue.state()` 里还有这一轮的 `total / done / lost / cancelled / writing / current`；`Queue.onFinish(fn)` 这一轮全部结束（队列空、没在写提示词，停 1.5 秒确认）时调 `fn({ total, done, lost, cancelled })`。通知栏进度用它们。
 - `CreatePage.draw(p, 张数)` 返回每张一个 Promise（出好是图库那一项，校验没过返回 null）；`p.label` 是队列里显示的名字，`p.characters` 给了就不用创作页的多角色格子。
 - `Writer.run({ plan: 张数 })`（0 = AI 定 2~6 张）返回 `{ images: [{ desc, tag, nl, negative, size }] }`；`Writer.run({ rewrite: { tag, nl, negative, hint } })` 照原画面重写。
 
