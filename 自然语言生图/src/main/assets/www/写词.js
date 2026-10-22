@@ -171,7 +171,8 @@
         const tries = 1 + (opt.retries == null ? retriesOf(settings) : opt.retries);
         const planning = opt.plan !== undefined && opt.plan !== false && opt.plan !== null;
         const nlOn = settings.nai.naturalLanguage && Params.supportsNl(settings.nai.model);
-        const task = planning ? planNote(opt.plan, nlOn) : opt.rewrite ? rewriteNote(opt.rewrite) : '';
+        // opt.task / opt.parse：别的写法自带说明和解析（漫画.js）；opt.note 附在说明后面（分镜一格一张）
+        const task = [opt.task || (planning ? planNote(opt.plan, nlOn) : opt.rewrite ? rewriteNote(opt.rewrite) : ''), opt.note].filter(Boolean).join('\n\n');
         let lastErr = null, hint = '';
         for (let i = 0; i < tries; i++) {
             const r = await Api.chat({
@@ -183,7 +184,7 @@
             });
             let res;
             try {
-                res = planning ? parsePlan(r.content, opt.plan) : parseReply(r.content);
+                res = opt.parse ? opt.parse(r.content) : planning ? parsePlan(r.content, opt.plan) : parseReply(r.content);
             } catch (e) {
                 lastErr = e;
                 hint = '（上次你的回复格式不对：' + e.message + '。这次只输出一段 JSON，不要别的内容。）';
@@ -191,12 +192,16 @@
             }
             // 重写不要 changes（建档在第一次写时已经做过，柏宝绘也是丢掉）；多张时 changes 只跟第一张走一次
             const raw = opt.rewrite ? '' : r.content;
-            const filt = (x, rawOf) => filters.reduce((y, fn) => fn(y, settings) || y, Object.assign(x, { raw: rawOf }));
+            const filt = (x, rawOf) => applyFilters(Object.assign(x, { raw: rawOf }), settings);
+            if (opt.parse) return Object.assign(res, { raw: r.content });
             if (planning) return { images: res.images.map((x, k) => Object.assign(filt(x, k ? '' : raw), { raw: k ? '' : r.content })), raw: r.content };
             return Object.assign(filt(res, raw), { raw: r.content });
         }
         throw new Error(lastErr.message + '（已自动重试）');
     }
 
-    window.Writer = { DEFAULT_SPEC, PLAN_MAX, run, parseReply, parsePlan, planNote, rewriteNote, buildMessages, messagesFor, retriesOf, addContext, addFilter, addMessages };
+    /** AI 回复解析好以后过一遍 addFilter 的扩展（自定义解析的自己调） */
+    const applyFilters = (x, settings) => filters.reduce((y, fn) => fn(y, settings) || y, x);
+
+    window.Writer = { applyFilters, DEFAULT_SPEC, PLAN_MAX, run, parseReply, parsePlan, planNote, rewriteNote, buildMessages, messagesFor, retriesOf, addContext, addFilter, addMessages };
 })();

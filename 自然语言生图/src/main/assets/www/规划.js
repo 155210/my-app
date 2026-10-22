@@ -19,7 +19,7 @@
         const box = $('#c-plan-box');
         if (!box) return;
         if (!plan || !plan.images || !plan.images.length) { box.innerHTML = ''; return; }
-        box.innerHTML = '<div class="card" id="c-plan-card"><div class="card-title"><span class="grow" style="flex:1">AI 拆成了 ' + plan.images.length + ' 张</span>'
+        box.innerHTML = '<div class="card" id="c-plan-card"><div class="card-title"><span class="grow" style="flex:1">' + esc(plan.title || 'AI 拆成了 {n} 张').replace('{n}', plan.images.length) + '</span>'
             + '<button class="btn small primary" data-all>全部出图</button><button class="btn small" data-close-plan>收起</button></div>'
             + '<div class="card-sub">' + esc(plan.desc.slice(0, 80)) + '</div>'
             + plan.images.map((im, i) => '<div class="plan-item" data-i="' + i + '">'
@@ -57,8 +57,9 @@
         if (n) toast('info', n + ' 张排进出图队列了');
     }
 
-    function show(desc, images) {
-        plan = { desc: String(desc || '').trim(), images: images.map((x) => ({ desc: x.desc || '', tag: x.tag, nl: x.nl, negative: x.negative, size: x.size })), time: Date.now() };
+    /** title 可选：卡片标题，{n} 换成张数（分镜一格一张用） */
+    function show(desc, images, title) {
+        plan = { title: title || '', desc: String(desc || '').trim(), images: images.map((x) => ({ desc: x.desc || '', tag: x.tag, nl: x.nl, negative: x.negative, size: x.size })), time: Date.now() };
         save();
         render();
         const card = $('#c-plan-card');
