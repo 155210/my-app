@@ -209,18 +209,32 @@
         };
     }
 
-    async function addFile(f) {
+    /** 读一个文件（图片或 .naiv4vibe），存好数据，返回 { id, name, strength, info, hasImage }；不放进创作页 */
+    async function importFile(f) {
         const name = String(f.name || '').replace(/\.[^.]+$/, '');
         const head = new Uint8Array(await f.slice(0, 1).arrayBuffer())[0];
         const x = head === 0x7b /* { */ ? fromVibeFile(await f.text()) : await fromImage(f, name);
         if (!x.data.thumb && x.data.image) x.data.thumb = draw(await readImage(new Blob([Uint8Array.from(atob(x.data.image), (c) => c.charCodeAt(0))])), 160, 'image/jpeg', 0.8);
         const id = 'vb_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
         await store(id, x.data);
-        nai().vibes.push({ id, name: x.name, on: true, strength: round2(x.strength), info: round2(x.info) });
+        const v = { id, name: x.name, strength: round2(x.strength), info: round2(x.info), hasImage: !!x.data.image };
+        if (window.VibeLib) VibeLib.adopt(v); // 加过的图都进 Vibe 库
+        return v;
+    }
+
+    /** 放进创作页的卡片（已经在就打开） */
+    function use(v) {
+        const list = nai().vibes, had = list.find((x) => x.id === v.id);
+        if (had) had.on = true;
+        else list.push({ id: v.id, name: v.name, on: true, strength: round2(v.strength), info: round2(v.info) });
         UI.saveSettings();
-        render();
-        costChanged();
-        toast('success', '「' + x.name + '」' + (x.data.image ? '' : '（只有编码，没带原图）'), '已加画风参考');
+        load(v.id).catch(() => null).then(() => { render(); costChanged(); });
+    }
+
+    async function addFile(f) {
+        const v = await importFile(f);
+        use(v);
+        toast('success', '「' + v.name + '」' + (v.hasImage ? '' : '（只有编码，没带原图）'), '已加画风参考');
     }
 
     // ------------------------------------------------------------
@@ -322,6 +336,7 @@
         const list = nai().vibes;
         const n = list.filter((x) => x.on !== false).length;
         card.innerHTML = '<div class="row"><div class="label grow" style="margin:0">画风参考图（Vibe）' + (n ? ' <span class="badge acc">' + n + ' 张</span>' : '') + '</div>'
+            + (window.VibeLib ? '<button class="btn small" data-a="lib">Vibe 库</button>' : '')
             + '<button class="btn small" data-a="add">加参考图</button></div>'
             + (list.length ? '' : '<div class="card-sub">加一张图让出图模仿它的画风、配色、氛围。可以选手机里的图片，或者官网导出的 .naiv4vibe 文件。</div>')
             + list.map((v, i) => {
@@ -333,7 +348,7 @@
                     + '<label class="switch"><input type="checkbox" data-f="on"' + (v.on !== false ? ' checked' : '') + ' aria-label="启用"><span></span></label></div>'
                     + '<div class="vibe-slider"><span>强度</span><input type="range" min="0" max="1" step="0.05" data-f="strength" value="' + v.strength + '"><b>' + v.strength + '</b></div>'
                     + '<div class="vibe-slider"><span>信息提取量</span><input type="range" min="0.05" max="1" step="0.05" data-f="info" value="' + v.info + '"><b>' + v.info + '</b></div>'
-                    + '<div class="row" style="justify-content:flex-end"><button class="btn small" data-a="export">导出 .naiv4vibe</button><button class="btn small danger" data-a="del">删除</button></div>'
+                    + '<div class="row" style="justify-content:flex-end"><button class="btn small" data-a="export">导出 .naiv4vibe</button><button class="btn small danger" data-a="del">' + (window.VibeLib && VibeLib.has(v.id) ? '移出' : '删除') + '</button></div>'
                     + '</div>';
             }).join('')
             + (list.length ? '<div class="card-sub">强度：越大越像参考图。信息提取量：越大带过来的细节越多（内容、构图也会跟着像），只想要画风就调低。'
@@ -347,7 +362,7 @@
             if (!f || !box) return;
             const v = nai().vibes[Number(box.dataset.i)];
             if (f === 'on') { v.on = e.target.checked; UI.saveSettings(); render(); costChanged(); return; }
-            if (f === 'name') v.name = e.target.value;
+            if (f === 'name') { v.name = e.target.value; if (window.VibeLib) VibeLib.rename(v.id, v.name); }
             else {
                 v[f] = round2(Number(e.target.value));
                 e.target.nextElementSibling.textContent = v[f];
@@ -362,8 +377,17 @@
                 if (f) addFile(f).catch((err) => toast('error', err.message || String(err), '加参考图失败'));
                 return;
             }
+            if (b.dataset.a === 'lib') { VibeLib.pick(); return; }
             const i = Number(b.closest('[data-i]').dataset.i), v = nai().vibes[i];
             if (b.dataset.a === 'export') exportVibe(v).catch((err) => toast('error', err.message, '导出失败'));
+            if (b.dataset.a === 'del' && window.VibeLib && VibeLib.has(v.id)) {
+                nai().vibes.splice(i, 1); // 只从创作页拿掉，图和编码还在 Vibe 库里
+                UI.saveSettings();
+                render();
+                costChanged();
+                toast('info', 'Vibe 库里还留着，要用再从库里选', '已移出「' + v.name + '」');
+                return;
+            }
             if (b.dataset.a === 'del') {
                 if (!await UI.confirmBox('删除参考图「' + v.name + '」？', '编码也一起删掉，以后再加要重新编码。', '删除', true)) return;
                 nai().vibes.splice(i, 1);
@@ -404,5 +428,5 @@
             text: '加一张图（手机里的、App 图库里的，或官网导出的 .naiv4vibe）。强度越大越像；信息提取量越大带过来的细节越多，只想要画风就调低。V5 官方不支持，开着角色参考时也会暂停。' });
     });
 
-    window.Vibes = { modelKey, prepare, cost, fromVibeFile, addFile, exportVibe, load, render };
+    window.Vibes = { modelKey, prepare, cost, fromVibeFile, addFile, importFile, use, exportVibe, load, render, findEnc, KEY_LABEL, forget: (id) => cache.delete(id), changed: costChanged };
 })();
