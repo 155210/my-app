@@ -194,7 +194,8 @@ textarea.ta.small { min-height: 56px; }
 .grid.selecting .thumb.picked { outline: 3px solid var(--accent); outline-offset: -3px; }
 .grid.selecting .thumb.picked img { opacity: .75; }
 .grid.selecting .thumb.picked::after { background: var(--accent) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M6 12l4 4 8-9' fill='none' stroke='%231e1a14' stroke-width='3'/%3E%3C/svg%3E") center/14px no-repeat; border-color: var(--accent); }
-.sel-bar .grow { flex: 1; }
+.sel-bar { flex-wrap: wrap; row-gap: 6px; }
+.sel-bar .grow { flex: 1 0 auto; white-space: nowrap; }
 .g-filter { margin: 0 0 10px; }
 .g-filter input[type=search] { width: 100%; border: 1px solid var(--line); background: var(--bg); border-radius: 10px; padding: 7px 11px; outline: none; }
 .g-filter input[type=search]:focus { border-color: var(--accent); }
@@ -273,6 +274,12 @@ pre.recipe { margin: 0 0 12px; padding: 8px 10px; border-radius: 10px; backgroun
 /* 图库：收藏、相册、排序、文件名规则 */
 .g-views { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; }
 .g-views .g-chips { flex: 1; min-width: 0; padding: 0; }
+.g-date { flex: none; display: inline-flex; align-items: center; gap: 3px; max-width: 34%; border: 1px solid var(--line); background: var(--bg); border-radius: 10px; padding: 4px 8px; font-size: 13px; color: var(--dim); }
+.g-date span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.g-date svg { width: 15px; height: 15px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; }
+.g-date.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+.menu-item .g-date-n { margin-left: auto; color: var(--faint); font-size: 12px; }
+.menu-item.on { color: var(--accent); font-weight: 600; }
 .g-views select { flex: none; max-width: 31%; border: 1px solid var(--line); background: var(--bg); border-radius: 10px; padding: 4px 8px; font-size: 13px; color: var(--dim); }
 .g-chips button.add { border-style: dashed; color: var(--faint); }
 .fav-mark { position: absolute; left: 5px; bottom: 3px; color: #ffd257; font-size: 15px; line-height: 1; text-shadow: 0 0 3px rgba(0, 0, 0, .8); pointer-events: none; }
