@@ -260,13 +260,16 @@ const tmp = fs.mkdtempSync(path.join(OUT, 'vibe-'));
   await page.waitForSelector('#c-vibes .vibe-item');
   ok((await page.$$('#c-vibes .vibe-item')).length === 2 && (await page.$$('#c-vibes .vibe-thumb[src]')).length >= 1 && (await page.$$('#c-dirrefs .vibe-item')).length === 2, '重开后参考图、角色参考和缩略图都在');
   ok(await page.inputValue('.char-item [data-f="tag"]') === 'girl, cat ears', '重开后角色还在');
-  // 删除参考图连数据一起删
-  page.once('dialog', () => {});
+  // 卡片上「移出」只拿掉，数据留在 Vibe 库；在 Vibe 库里删除才连图和编码一起删
+  const gone = await page.evaluate(() => UI.settings.nai.vibes[0].id);
   await page.click('#c-vibes .vibe-item[data-i="0"] [data-a="del"]');
-  await page.click('#layers [data-yes]');
   await page.waitForTimeout(300);
-  const keys = await page.evaluate(() => Store.keys());
-  ok(keys.filter((k) => String(k).startsWith('vibe:')).length === 1, '删除参考图连图和编码一起删');
+  let keys = await page.evaluate(() => Store.keys());
+  ok((await page.$$('#c-vibes .vibe-item')).length === 1 && keys.filter((k) => String(k).startsWith('vibe:')).length === 2, '卡片上移出参考图，图和编码还留在 Vibe 库');
+  await page.evaluate((id) => VibeLib.remove(id), gone);
+  await page.waitForTimeout(300);
+  keys = await page.evaluate(() => Store.keys());
+  ok(keys.filter((k) => String(k).startsWith('vibe:')).length === 1, '在 Vibe 库删除连图和编码一起删');
 
   // 参数预设用的整份导出：关着的角色和互动都能还原
   ok(await page.evaluate(() => {
