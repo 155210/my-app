@@ -125,6 +125,7 @@
         autoDraw: true,          // 写完提示词自动出图
         tags: { hint: true, fix: true, complete: true, highlight: true }, // 标签库：给 AI 参考标签、写完纠错（见 标签库.js）；联想、高亮（提示词编辑.js）；wildcards 通配符（通配符.js）
         chars: { inject: true, autoCreate: true, autoUpdate: true }, // 角色库：外貌发给 AI、自动建档、永久变化自动更新（见 角色库.js）
+        view: { r18: false, r18Tags: '' }, // R18 开关：关着时带 nsfw 类标签的图不显示（见 R18显示.js）
     };
 
     /** 合并存储里的设置和默认值（新版本加的字段自动补上） */
@@ -155,6 +156,7 @@
             autoDraw: s.autoDraw === undefined ? DEFAULTS.autoDraw : !!s.autoDraw,
             tags: Object.assign({}, DEFAULTS.tags, s.tags),
             chars: Object.assign({}, DEFAULTS.chars, s.chars),
+            view: Object.assign({}, DEFAULTS.view, s.view),
         };
     }
 

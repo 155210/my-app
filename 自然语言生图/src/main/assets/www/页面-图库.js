@@ -90,6 +90,14 @@
             $('#g-import', r).onclick = pickAndImport;
             return;
         }
+        const hiddenN = window.R18 ? items.filter((x) => !R18.visible(x)).length : 0; // R18 开关关着时藏起来的
+        if (hiddenN) items = items.filter(R18.visible);
+        if (!items.length) {
+            r.innerHTML = '<div class="empty"><b>没有可显示的图</b>' + hiddenN + ' 张 R18 图藏起来了，到设置页「R18」打开「显示 R18 图」才显示'
+                + '<div class="btns" style="justify-content:center"><button class="btn" id="g-r18">去设置</button></div></div>';
+            $('#g-r18', r).onclick = () => SettingsPage.open('r18');
+            return;
+        }
         const all = items;
         const albums = await Gallery.albums();
         if (filt.view && filt.view !== 'fav' && !albums.some((a) => a.id === filt.view)) filt.view = '';
@@ -829,7 +837,8 @@
     async function openViewer(id, ids) {
         const master = await Gallery.list();
         // 拷一份：看大图时新出的图（编辑、放大）插到图库最前面，不能把这里的顺序挤乱
-        const items = ids ? master.filter((x) => ids.includes(x.id)) : master.slice();
+        // R18 开关关着时左右滑跳过 R18 图（点开的这张本身照常显示，比如创作页刚出好的）
+        const items = (ids ? master.filter((x) => ids.includes(x.id)) : master.slice()).filter((x) => x.id === id || !window.R18 || R18.visible(x));
         let idx = items.findIndex((x) => x.id === id);
         if (idx < 0) return;
         let url = '';

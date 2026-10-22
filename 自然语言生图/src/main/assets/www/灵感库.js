@@ -107,9 +107,12 @@
             + '<div class="in-tags">' + esc(it.tags || '（没有正面词）') + '</div></div>';
     }
 
+    /** R18 开关关着时不显示带 nsfw 类标签的条目（见 R18显示.js） */
+    const shown = () => window.R18 ? data.list.filter(R18.inspoVisible) : data.list;
+
     function filtered() {
         const q = ui.q.trim().toLowerCase();
-        return data.list.filter((x) => (!ui.cat || x.cat === ui.cat)
+        return shown().filter((x) => (!ui.cat || x.cat === ui.cat)
             && (!q || (x.name + '\n' + x.tags + '\n' + x.negative + '\n' + x.note).toLowerCase().includes(q)));
     }
 
@@ -124,13 +127,13 @@
         const draw = () => {
             const cats = allCats();
             if (ui.cat && !cats.includes(ui.cat)) ui.cat = '';
-            const count = (c) => data.list.filter((x) => x.cat === c).length;
-            $('.in-cats', L.box).innerHTML = '<button data-c=""' + (ui.cat ? '' : ' class="on"') + '>全部 ' + data.list.length + '</button>'
+            const count = (c) => shown().filter((x) => x.cat === c).length;
+            $('.in-cats', L.box).innerHTML = '<button data-c=""' + (ui.cat ? '' : ' class="on"') + '>全部 ' + shown().length + '</button>'
                 + cats.map((c) => '<button data-c="' + esc(c) + '"' + (ui.cat === c ? ' class="on"' : '') + '>' + esc(c) + ' ' + count(c) + '</button>').join('');
             const list = filtered();
             $('.in-count', L.box).textContent = '';
             $('.in-grid', L.box).innerHTML = list.length ? list.map(cardHtml).join('')
-                : data.list.length ? '<div class="empty" style="grid-column:1/-1">没有找到</div>'
+                : data.list.length ? '<div class="empty" style="grid-column:1/-1">' + (shown().length ? '没有找到' : '有 ' + data.list.length + ' 条是 R18 的，设置页「R18」打开才显示') + '</div>'
                     : '<div class="empty" style="grid-column:1/-1"><b>灵感库是空的</b>点「新建」存一段常用的提示词（某个角色、某种画风、某个场景），配一张预览图；或者在图库大图下面点「存灵感」，把那张图的提示词连图一起存进来</div>';
         };
         draw();
