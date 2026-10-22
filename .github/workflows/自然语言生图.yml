@@ -38,6 +38,20 @@ jobs:
         with:
           gradle-version: '8.9'
 
+      # 自动打码的识别模型和运行库（几十 MB，不进 git）：deepghs 动漫模型（HuggingFace）、NudeNet（PyPI）、onnxruntime-web（npm）
+      - name: 打码模型缓存
+        id: censor
+        uses: actions/cache@v4
+        with:
+          path: 自然语言生图/src/main/assets/www/依赖/打码
+          key: censor-${{ hashFiles('自然语言生图/工具/下载打码模型.py') }}
+
+      - name: 下载打码模型
+        if: steps.censor.outputs.cache-hit != 'true'
+        run: |
+          pip install -q onnxruntime numpy
+          python3 自然语言生图/工具/下载打码模型.py
+
       - name: 打包 自然语言生图 APK
         run: gradle :自然语言生图:assembleRelease --no-daemon
 
