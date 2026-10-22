@@ -128,6 +128,8 @@ public class MainActivity extends Activity {
         saver = new FileSaver(this);
         updater = new ApkUpdater(this, web);
         web.addJavascriptInterface(new Bridge(), "AndroidBridge");
+        KeepAliveService.onCancel = () -> runOnUiThread(() ->
+                web.evaluateJavascript("window.Queue && Queue.cancelAll()", null));
 
         web.loadUrl(HOME);
 
@@ -196,11 +198,20 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        KeepAliveService.appVisible = true;
+        KeepAliveService.clearDone(this);
         if (updater != null) updater.onResume();
     }
 
     @Override
+    protected void onPause() {
+        KeepAliveService.appVisible = false;
+        super.onPause();
+    }
+
+    @Override
     protected void onDestroy() {
+        KeepAliveService.onCancel = null;
         http.shutdown();
         KeepAliveService.stop(this);
         web.destroy();
@@ -306,6 +317,18 @@ public class MainActivity extends Activity {
         public void keepAlive(boolean on) {
             if (on) KeepAliveService.start(MainActivity.this);
             else KeepAliveService.stop(MainActivity.this);
+        }
+
+        /** 通知栏出图进度：ended = 这一轮已结束几张，total = 一共几张 */
+        @JavascriptInterface
+        public void queueProgress(String title, String text, int ended, int total) {
+            KeepAliveService.progress(title, text, ended, total);
+        }
+
+        /** 一轮全部出完：App 在后台时弹「出好了」 */
+        @JavascriptInterface
+        public void queueDone(String title, String text) {
+            KeepAliveService.finished(MainActivity.this, title, text);
         }
 
         @JavascriptInterface
