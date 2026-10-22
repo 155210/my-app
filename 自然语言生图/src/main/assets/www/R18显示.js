@@ -41,7 +41,8 @@
     }
     function tagsNsfw(str) {
         rules();
-        return String(str || '').split(/[,，\n|]/).some((raw) => {
+        // 也按句号、分号拆：「nsfw. A girl ...」这种标签后面直接接英文描述的（1.5:: 里的小数点不拆）
+        return String(str || '').split(/[,，\n|;；。]|\.(?=\s|$)/).some((raw) => {
             const t = norm(raw);
             return t && (exact.has(t) || prefix.some((p) => t.startsWith(p)));
         });
