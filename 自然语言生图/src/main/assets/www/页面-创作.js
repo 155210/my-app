@@ -23,6 +23,9 @@
     }
 
     const PLAN_OPTS = [['', '不拆，写一张'], ['auto', 'AI 定张数']].concat([2, 3, 4, 5, 6].map((n) => [String(n), '拆成 ' + n + ' 张']));
+    // 扩展口：CreatePage.addMode({ value, label, button, write(runAi, draft) })，「拆成多张」下拉里多一项（漫画.js 用）
+    const modes = [];
+    const modeOf = () => modes.find((m) => m.value === draft.plan) || null;
 
     function nlVisible() {
         const n = UI.settings.nai;
@@ -37,7 +40,7 @@
             + '<label class="check grow" style="margin:0"><span class="switch"><input type="checkbox" id="c-auto"><span></span></span><span>写完自动出图</span></label>'
             + '<button class="btn primary" id="c-write">AI 写提示词</button></div>'
             + '<div class="row" style="margin-top:8px">'
-            + '<select id="c-plan" style="width:auto;padding:6px 4px" aria-label="一段描述拆成多张">' + PLAN_OPTS.map((o) => '<option value="' + o[0] + '">' + o[1] + '</option>').join('') + '</select>'
+            + '<select id="c-plan" style="width:auto;padding:6px 4px" aria-label="一段描述拆成多张">' + PLAN_OPTS.concat(modes.map((m) => [m.value, m.label])).map((o) => '<option value="' + o[0] + '">' + o[1] + '</option>').join('') + '</select>'
             + '<label class="check grow" style="margin:0;justify-content:flex-end" id="c-nlsw-wrap"><span id="c-nlsw-text" style="font-size:13px;color:var(--dim)">英文描述</span>'
             + '<span class="switch"><input type="checkbox" id="c-nlsw"><span></span></span></label></div>'
             + '<pre class="live" id="c-live" hidden></pre>'
@@ -141,7 +144,7 @@
         $('#c-status', r).textContent = qs
             + Params.modelLabel(s.nai.model) + ' · ' + (draft.size === 'landscape' ? s.nai.landscapeSize : s.nai.portraitSize)
             + (Number(s.nai.seed) > 0 ? ' · 种子 ' + s.nai.seed : '');
-        $('#c-write', r).textContent = writing ? '停止' : draft.plan ? 'AI 拆成多张' : 'AI 写提示词';
+        $('#c-write', r).textContent = writing ? '停止' : modeOf() ? modeOf().button : draft.plan ? 'AI 拆成多张' : 'AI 写提示词';
         $('#c-write', r).classList.toggle('danger', !!writing);
         $('#c-rewrite', r).disabled = !!writing;
     }
@@ -221,6 +224,7 @@
     }
 
     function write() {
+        if (modeOf()) return modeOf().write(runAi, draft);
         if (draft.plan) {
             const desc = draft.desc;
             return runAi({ plan: draft.plan === 'auto' ? 0 : Number(draft.plan) }, (res) => {
@@ -385,5 +389,6 @@
             text: '出好的图下面有「删除」，确认后这张图连同图库里的一起删掉，不用再去图库找。已经存到手机相册的不受影响。不花 Anlas。' });
     });
 
-    window.CreatePage = { init, refresh, reuse, draw, redraw, get draft() { return draft; }, get busy() { return !!writing; } };
+    const addMode = (m) => modes.push(m);
+    window.CreatePage = { init, refresh, reuse, draw, redraw, addMode, get draft() { return draft; }, get busy() { return !!writing; } };
 })();
