@@ -251,7 +251,7 @@
     }
 
     async function pickGallery() {
-        const items = (await Gallery.list()).slice(0, 90);
+        const items = (await Gallery.list()).filter((x) => !window.R18 || R18.visible(x)).slice(0, 90);
         if (!items.length) { toast('info', '图库里还没有图'); return null; }
         return new Promise((resolve) => {
             let done = false;
