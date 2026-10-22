@@ -34,6 +34,8 @@ PR 上也会打包，但只放在 Actions 的附件里，不发 Release。
 ├── 测试/漫画测试.js          漫画模式：一页多格（分镜框走多角色）、几页、黑白/阅读顺序/对白、分镜一格一张
 ├── 测试/提示词工具测试.js      联想、调权重、高亮、标签说明、通配符、预设
 ├── 工具/做标签说明.py          生成 依赖/标签说明.json
+├── 测试/打码测试.js          自动打码：YOLO 输出解析、四种样式只改框里、编辑页拖框/点框、另存、设置页、出图后自动打码（模型真跑一遍）
+├── 工具/下载打码模型.py        下载 依赖/打码/ 里的模型和运行库（不进 git，Actions 打包前跑）
 ├── 测试/图库整理测试.js      收藏、相册、排序、文件名规则、导入外部图片并填回创作页、主题配色
 ├── 工具/做标签库.py            生成 依赖/标签.json（换数据源时才跑）；工具/标签补译.txt 是手动补的中文
 └── src/main/
@@ -92,6 +94,8 @@ PR 上也会打包，但只放在 Actions 的附件里，不发 Release。
         ├── 提示词编辑.js         【提示词格子】联想（中英文、通配符）、− ＋ 调权重、ⓘ 看说明、语法高亮
         ├── 通配符.js             【通配符】__名字__ 出图时随机换一行（设置 tags.wildcards，设置页「通配符」）
         ├── 参数预设.js           【预设】整套 NAI 参数 + 多角色 + 参考图开关强度，创作页顶上下拉切换（presets 键）
+        ├── 打码.js               【自动打码】手机上跑 YOLO 认敏感部位（onnxruntime-web），马赛克/模糊/黑条/白光，另存一张；设置页「打码」；出图后自动打码
+        ├── 依赖/打码/            模型 + 运行库（不进 git，见下「自动打码」）
         └── 启动.js               启动、底部标签切换
 ```
 
@@ -144,6 +148,20 @@ PR 上也会打包，但只放在 Actions 的附件里，不发 Release。
 - 结果都存进图库，配方 `meta.edit = { kind, label, from, strength, … }`；做完自动打开前后对比（左右拖分界线），`from` 那张还在时大图有「对比原图」。
 - 花费：有 `window.Cost`（计价.js）就用它的 `enhance / upscale / tool / label / tag`，没有就用 `ImgEdit.Price` 的兜底公式（同 NAIWeaver 的 nai_cost_estimator；放大、图像工具的价目是估的）。
 - 测试：`测试/图生图测试.js`（`SHOT=目录` 时顺便截图）。
+
+## 自动打码
+
+- 全在手机上算，不联网、不花 Anlas。入口：大图下面「打码」；设置页「打码」标签；设置里打开「出图后自动打码」后每出一张新图（`meta.edit` 为空、不是导入的）就认一遍，认出来就另存一张（包了一层 `Gallery.add`）。
+- 模型（`依赖/打码/`，`.gitignore` 掉了，Actions 里 `工具/下载打码模型.py` 下载并缓存；本地测试跑 `python3 工具/下载打码模型.py --skip-missing`，沙箱里 HuggingFace 不通就只有写实模型）：
+  - `动漫.onnx`：deepghs/anime_censor_detection（MIT，`censor_detect_v1.0_s`，640）：nipple_f / penis / pussy。输入直接拉伸到 imgsz（同 imgutils）。
+  - `写实.onnx`：NudeNet 3.4 的 320n（MIT，320）：多认肛门、臀部、整个露出的胸部。输入在右下补黑成正方形再缩（同 NudeNet）。
+  - `*.json`：`{ name, imgsz: [宽, 高], labels, pad, threshold? }`，imgsz / labels 从模型元数据读。
+  - `ort.js` / `ort.wasm`：onnxruntime-web 1.18.0 的 `ort.wasm-core.min.js` + `ort-wasm-simd.wasm`（IR 10 的模型要 ≥1.18；1.19 起换成 .mjs，WebViewAssetLoader 给不出 JS 的 MIME，所以停在 1.18）。wasm 自己 fetch 成 ArrayBuffer 交给 `ort.env.wasm.wasmBinary`，单线程（WebView 没有跨源隔离）。
+- 两个模型输出都是 YOLOv8 的 `[1, 4+类别数, 框数]`，`Censor.parse` 取最高分类别 → 部位（`LABEL_PART`）→ 阈值（设置「灵敏度」，默认 0.30）→ 同部位 NMS 0.45。「两个都用」两次结果合并再 NMS。
+- 打码（`Censor.render`）：框按「扩大范围」% 往外扩，方形 / 圆形裁剪；马赛克先把整张缩小再放大（格子全图对齐），模糊整张 blur 两遍再按框贴，黑条 / 白光直接填。框外一个像素不动。
+- 结果存 PNG，配方照原图抄、`meta.edit = { kind: 'censor', label: '打码', from, style, n, auto? }`，有「对比原图」。编辑页里选的样式 / 形状 / 力度 / 范围记成默认。
+- 设置在 `settings.nai.censor`（默认值在 `打码.js` 的 `CFG_DEFAULTS`）：`{ model, style, shape, strength, expand, threshold, auto, parts: { nipple, breast, pussy, penis, anus, butt } }`。
+- 测试：`测试/打码测试.js`。
 
 ## 图片里的出图信息
 
