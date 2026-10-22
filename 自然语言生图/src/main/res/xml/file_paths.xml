@@ -2,4 +2,6 @@
 <!-- 应用内更新下载的安装包放在 cache/update/，通过 FileProvider 交给系统安装器 -->
 <paths>
     <cache-path name="update" path="update/" />
+    <!-- 分享出去的图片（先处理图片信息再分享）放在 cache/share/ -->
+    <cache-path name="share" path="share/" />
 </paths>

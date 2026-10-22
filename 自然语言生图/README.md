@@ -40,6 +40,7 @@ PR 上也会打包，但只放在 Actions 的附件里，不发 Release。
     │   ├── MainActivity.java     WebView 外壳，加载 assets/www/首页.html，JS 桥 AndroidBridge
     │   ├── NativeHttp.java       请求代发（无跨域限制、支持 http、流式逐块回传）
     │   ├── ApkUpdater.java     应用内更新：下载新版 APK、调起系统安装（FileProvider）
+    │   ├── ShareHelper.java     分享：图片分块写进 cache/share/，经 FileProvider 交给系统分享面板
     │   ├── FileSaver.java        图片按保存位置存：隐藏文件夹 下载/自然语言生图/图片/（带 .nomedia，默认）/ 相册 / 自选文件夹（SAF）；其他文件进 下载/自然语言生图/
     │   └── KeepAliveService.java 写提示词、出图期间开的前台服务，切后台不断；常驻通知显示出图进度、「全部取消」，一轮出完 App 在后台时弹「出好了」
     └── assets/www/
@@ -74,6 +75,8 @@ PR 上也会打包，但只放在 Actions 的附件里，不发 Release。
         ├── 更新.js               检查更新：查 Releases 里最新 shengtu-N，和本机 1.0.N 比，外壳下载后调起安装
         ├── 标签库.js             【标签库】中英对照、搜索、点一下加进提示词；给 AI 参考标签、写完纠错
         ├── 主题.js               主题配色：8 套预设 + 自定义（背景/文字/强调色推出整套 CSS 变量），存 Store 'theme'，设置页「主题」
+        ├── 导出.js               【导出】保存 / 分享时图片信息保留、清除（PNG 文字块 + 隐写、JPG EXIF）、改写；分享（外壳 share* / navigator.share）
+        ├── 图库日期.js           图库按日期筛选：今天、近 7 / 30 天、指定范围
         ├── 图库角色.js           图库按角色筛选 / 搜索：从配方认出角色库的角色、Danbooru 角色和作品标签（中文名）
         ├── 图生图.js             【图生图与编辑】编辑页（图生图 / 局部重绘涂遮罩 / 精修放大含 V5 MAX）、创作页「底图」卡片、编辑类花费预估
         ├── 图像工具.js           【图生图与编辑】官方 4 倍放大、6 个图像工具（去背景、线稿、草图、上色、换表情 24 种、去杂物）、前后对比滑块、大图快捷按钮
@@ -142,6 +145,14 @@ PR 上也会打包，但只放在 Actions 的附件里，不发 Release。
 存进图库和相册的都是 NAI 回的原 PNG，里面带 NAI 写的出图信息（tEXt 的 `Comment` JSON，和透明通道最低位的隐写 `stealth_pngcomp`），能拖回 NovelAI 官网读出提示词。
 图库「读取图片信息」两种都能读。转 JPG（图库选项里，默认关）会丢掉这些信息，App 里自己存的配方不受影响。
 
+导出时（保存到手机、分享）可以处理这些信息（`导出.js`，设置存 `galleryPrefs.exportInfo`：keep 默认 / strip / ask）：
+- 清除：PNG 去掉 tEXt / zTXt / iTXt / eXIf / tIME 块（逐块重拼，不重新压缩）；还读得出隐写就重画一遍，透明度最低位都改成 1（全透明的不动），颜色不变。JPG 去掉 APP1（EXIF/XMP）、APP3~13、APP15、注释，留 JFIF / ICC / Adobe。其他格式重新编码。
+- 改写（单张）：先清除，再在 IHDR 后面写 Title / Description / Software / Source / Comment（Comment 是 NAI 格式 JSON，`prompt` / `uc` / `seed`，勾「保留其他参数」时用原 Comment 里的其余参数并同步 V4 的 base_caption）。不是 PNG 的存成 PNG。
+- 分享：外壳 `shareBegin / shareChunk / shareEnd / shareSend`（`ShareHelper.java`，文件写进 cache/share/ 经 FileProvider 给系统分享面板，一小时前的旧文件顺手删）；浏览器里用 navigator.share，不支持就下载。
+- 入口：大图「分享」、长按菜单「分享」「导出（处理图片信息）…」、多选栏分享按钮和「收藏 / 相册」菜单里的「导出」。App 里的原图不动。
+
+图库按日期筛选（`图库日期.js`）：排序旁边的日期按钮，今天 / 近 7 天 / 近 30 天（含今天，按本地日期整天算）/ 指定日期范围（可只填一头，截止那天整天算），和收藏、相册、人物、搜索叠加，不存。
+
 ## 出图怎么拼
 
 - 正面 = 画风模板前缀, AI 写的标签, 画风模板后缀, 质量词（模板绑定的 → NAI 出图页的 → 模型默认，`Params.qualityOf`）；4.5 / V5 且开了「英文描述」时再接 `. 英文描述`
@@ -173,6 +184,8 @@ PW=/opt/node-tools/node_modules/playwright CHROME=/opt/pw-browsers/chromium-1194
 （`测试/队列测试.js` 同样的跑法。）
 
 起本地静态服务、拦截假 AI 和假 NAI 接口，走一遍：设置 → 拉模型 → 写提示词（第一次故意回错格式，测自动重试）→ 自动出图 → 图库（读 PNG 文本 / 隐写里的 NAI 信息、PNG 转 JPG、四档大小、长按菜单、大图滑动/缩放/长按、完整配方、删除）→ 重开页面数据还在 → 返回键。
+
+`测试/导出与日期测试.js`：日期筛选（今天、近 7/30 天、指定范围、只填一头、跨天边界、和收藏叠加）；清除 PNG 文本 / 隐写 / JPG EXIF（画面不变、CRC 对）；改写（保留 / 不保留参数、V4 base_caption）；设成清除后保存、每次问弹选择并改写保存、假外壳分享单张 / 多张。
 
 `测试/图库整理测试.js`：排序四种、长按 / 多选 / 大图星星收藏、只看收藏、新建相册、一张进多个相册、移出、改名、删相册图还在、文件名规则和计数、导入外部图（带 / 不带 NAI 信息，原样不转 JPG）、一键填回创作页、主题切换 / 自定义颜色 / 重开还在 / 进备份。
 

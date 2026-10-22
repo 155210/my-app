@@ -7,7 +7,8 @@
  *   img:<id>      原图 Blob
  *   galleryPrefs  图库自己的偏好：{ size: 小/中/大/铺满, jpg: PNG 自动转 JPG, quality: JPG 质量,
  *                 save: 存到手机的位置 hidden/album/custom, saveTree / saveTreeName: 自选文件夹, saveHide: 自选文件夹里放 .nomedia,
- *                 sort: new/old/name/size 排序, nameRule: 保存到手机的文件名规则, nameCounter: {计数} 用到哪了 }
+ *                 sort: new/old/name/size 排序, nameRule: 保存到手机的文件名规则, nameCounter: {计数} 用到哪了,
+ *                 exportInfo: 保存 / 分享时图片信息 keep 保留 / strip 清除 / ask 每次问（见 导出.js） }
  * 界面在 页面-图库.js。
  *
  * NAI 出的 PNG 里自带出图信息（tEXt 的 Comment JSON + 透明通道最低位的「隐写」信息），
@@ -346,11 +347,12 @@
         return nameByRule(item, (prefs || PREFS).nameRule, counter) + '.' + (item.ext || 'png');
     }
 
-    /** 存到手机相册（App 里）/ 浏览器下载 */
-    async function saveToPhone(item) {
+    /** 存到手机相册（App 里）/ 浏览器下载；out = { blob, ext } 时存这份（导出.js 处理过图片信息的），不给就存原图 */
+    async function saveToPhone(item, out) {
         await getPrefs(); // 保证保存位置已经同步给外壳
-        const blob = await getBlob(item.id);
+        const blob = out ? out.blob : await getBlob(item.id);
         if (!blob) throw new Error('原图找不到了');
+        if (out && out.ext) item = Object.assign({}, item, { ext: out.ext });
         let name = fileName(item);
         if (/\{计数\}/.test(prefs.nameRule || '')) {
             await setPrefs({ nameCounter: (prefs.nameCounter || 0) + 1 });
@@ -364,6 +366,6 @@
         return '浏览器下载';
     }
 
-    window.Gallery = { list, add, getBlob, remove, saveToPhone, fileName, getPrefs, setPrefs, convertAll, readInfo, removeMany, SIZES, SAVE_MODES,
+    window.Gallery = { list, add, getBlob, remove, saveToPhone, fileName, getPrefs, setPrefs, convertAll, readInfo, pngText, stealthText, removeMany, SIZES, SAVE_MODES,
         albums, addAlbum, renameAlbum, removeAlbum, mark, sorted, SORTS, nameByRule, NAME_RULE, NAME_TOKENS };
 })();

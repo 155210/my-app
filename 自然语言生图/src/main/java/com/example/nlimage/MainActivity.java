@@ -46,6 +46,7 @@ public class MainActivity extends Activity {
     private NativeHttp http;
     private FileSaver saver;
     private ApkUpdater updater;
+    private ShareHelper sharer;
 
     @SuppressLint({"SetJavaScriptEnabled", "JavascriptInterface"})
     @Override
@@ -127,6 +128,7 @@ public class MainActivity extends Activity {
         http = new NativeHttp(web);
         saver = new FileSaver(this);
         updater = new ApkUpdater(this, web);
+        sharer = new ShareHelper(this);
         web.addJavascriptInterface(new Bridge(), "AndroidBridge");
         KeepAliveService.onCancel = () -> runOnUiThread(() ->
                 web.evaluateJavascript("window.Queue && Queue.cancelAll()", null));
@@ -258,6 +260,27 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public String fileEnd(String token) {
             return saver.end(token);
+        }
+
+        /** 分享：shareBegin 建临时文件 → shareChunk 分块写 → shareEnd 关文件 → shareSend 一起交给系统分享面板 */
+        @JavascriptInterface
+        public String shareBegin(String name) {
+            return sharer.begin(name);
+        }
+
+        @JavascriptInterface
+        public String shareChunk(String token, String b64) {
+            return sharer.chunk(token, b64);
+        }
+
+        @JavascriptInterface
+        public String shareEnd(String token) {
+            return sharer.end(token);
+        }
+
+        @JavascriptInterface
+        public String shareSend(String tokensJson, String mime, String title) {
+            return sharer.send(tokensJson, mime, title);
         }
 
         /** 图片保存位置：hidden / album / custom（tree = 文件夹授权 Uri，hide = 放 .nomedia） */
