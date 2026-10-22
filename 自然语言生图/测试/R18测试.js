@@ -24,10 +24,11 @@ const fails = []; const ok = (c, m) => { if (!c) fails.push(m); console.log((c ?
   const j = await page.evaluate(() => ({
     def: UI.settings.view.r18,
     a: R18.tagsNsfw('1girl, {{NSFW}}, smile'), b: R18.tagsNsfw('1girl, completely_nude'), c: R18.tagsNsfw('1.2::cum on body::, bed'),
-    d: R18.tagsNsfw('1girl, nude color scheme, sexy'), e: R18.tagsNsfw('(nipples:1.3)'), f: R18.tagsNsfw('1girl, school uniform'),
+    d: R18.tagsNsfw('1girl, nude color scheme, sexy'), e: R18.tagsNsfw('(nipples:1.3)'), g: R18.tagsNsfw('-1.5::3D face, realistic face::,nsfw. A girl'), h: R18.tagsNsfw('1.2::nude::. Sparkle; smile'), f: R18.tagsNsfw('1girl, school uniform'),
   }));
   ok(j.def === false, '默认关');
   ok(j.a && j.b && j.c && j.e, '认出 nsfw / completely_nude / 权重写法 / cum* 前缀');
+  ok(j.g && j.h, '标签后面直接接句号和英文描述也认得出');
   ok(!j.d && !j.f, '不是整个标签的不算（nude color scheme、sexy、普通图）');
 
   await page.evaluate(async () => {
