@@ -23,8 +23,8 @@ import android.widget.TextView;
 
 /** 设置页：填 gproxy 地址和账号，授权悬浮窗，开关悬浮岛 */
 public class MainActivity extends Activity {
-    private EditText url, user, pass, interval, recent;
-    private CheckBox pop;
+    private EditText url, user, pass, interval, recent, budget;
+    private CheckBox pop, vibrate, drag;
     private TextView status, testResult;
     private Button toggle;
 
@@ -46,7 +46,7 @@ public class MainActivity extends Activity {
         TextView title = label("gproxy 岛", 22, FG);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         box.addView(title);
-        TextView sub = label("在屏幕顶部显示 gproxy 今日用量。点一下展开看最近几次请求，按住可以拖动。", 13, MUTED);
+        TextView sub = label("在屏幕顶部显示 gproxy 今日用量。请求进行中黄灯闪烁并计时，完成亮绿灯，失败亮红灯。点一下展开看详情。", 13, MUTED);
         sub.setPadding(0, dp(6), 0, dp(18));
         box.addView(sub);
 
@@ -54,15 +54,21 @@ public class MainActivity extends Activity {
         user = field(box, "管理员用户名", Cfg.user(this), InputType.TYPE_CLASS_TEXT);
         pass = field(box, "管理员密码", Cfg.pass(this),
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
-        interval = field(box, "刷新间隔（秒，最少 10）", String.valueOf(Cfg.interval(this)), InputType.TYPE_CLASS_NUMBER);
+        float b0 = Cfg.budget(this);
+        budget = field(box, "每日预算（美元，0 = 不提醒；用到 80% 变黄，超了变红）",
+                b0 > 0 ? trim(b0) : "0", InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        interval = field(box, "空闲时刷新间隔（秒，最少 5；有请求时自动每 2 秒）",
+                String.valueOf(Cfg.interval(this)), InputType.TYPE_CLASS_NUMBER);
         recent = field(box, "展开后显示最近几次（0~10）", String.valueOf(Cfg.recent(this)), InputType.TYPE_CLASS_NUMBER);
 
-        pop = new CheckBox(this);
-        pop.setText("有新请求时胶囊短暂显示这次的模型和花费");
-        pop.setTextColor(FG);
-        pop.setChecked(Cfg.pop(this));
-        pop.setPadding(0, dp(4), 0, dp(4));
-        box.addView(pop);
+        pop = check(box, "请求完成/失败时胶囊短暂提示（绿灯/红灯）", Cfg.pop(this));
+        vibrate = check(box, "预算提醒和请求失败时震动", Cfg.vibrate(this));
+        drag = check(box, "解锁位置，允许拖动悬浮岛（不勾 = 锁定在顶部居中）", Cfg.draggable(this));
+
+        TextView logTip = label("想看到「生成中」：在 gproxy 控制台的设置里打开「上游日志」（不用开日志正文）。"
+                + "没开的话只有完成后的绿灯/红灯提示。", 12, MUTED);
+        logTip.setPadding(0, dp(4), 0, dp(4));
+        box.addView(logTip);
 
         Button test = button(box, "测试连接", false);
         testResult = label("", 13, MUTED);
@@ -110,7 +116,7 @@ public class MainActivity extends Activity {
             testResult.setText("已保存");
         });
 
-        Button reset = button(box, "悬浮岛位置复原（回到顶部居中）", false);
+        Button reset = button(box, "悬浮岛位置复原（解锁拖动后用）", false);
         reset.setOnClickListener(v -> {
             Cfg.sp(this).edit().remove("x").remove("y").apply();
             if (IslandService.running) {
@@ -170,6 +176,9 @@ public class MainActivity extends Activity {
                 .putInt("interval", Math.max(10, iv))
                 .putInt("recent", Math.max(0, Math.min(10, rc)))
                 .putBoolean("pop", pop.isChecked())
+                .putBoolean("vibrate", vibrate.isChecked())
+                .putBoolean("drag", drag.isChecked())
+                .putFloat("budget", Math.max(0f, parseF(budget.getText().toString())))
                 .apply();
     }
 
@@ -186,6 +195,11 @@ public class MainActivity extends Activity {
                 msg = "连接成功：今日 " + s.requests + " 次 · " + Cfg.money(s.cost)
                         + " · 入 " + Cfg.w(s.input) + " · 出 " + Cfg.w(s.output);
                 ok = true;
+                try {
+                    c.inflight();
+                } catch (Exception e) {
+                    msg += "\n读不到上游日志，「生成中」不可用：" + e.getMessage();
+                }
             } catch (java.net.ConnectException e) {
                 msg = "连不上：gproxy 没在运行，或地址/端口不对";
             } catch (Exception e) {
@@ -198,6 +212,29 @@ public class MainActivity extends Activity {
                 testResult.setText(m);
             });
         }).start();
+    }
+
+    private static float parseF(String s) {
+        try {
+            return Float.parseFloat(s.trim());
+        } catch (Exception e) {
+            return 0f;
+        }
+    }
+
+    private static String trim(float f) {
+        String s = String.valueOf(f);
+        return s.endsWith(".0") ? s.substring(0, s.length() - 2) : s;
+    }
+
+    private CheckBox check(LinearLayout box, String text, boolean on) {
+        CheckBox c = new CheckBox(this);
+        c.setText(text);
+        c.setTextColor(FG);
+        c.setChecked(on);
+        c.setPadding(0, dp(4), 0, dp(4));
+        box.addView(c);
+        return c;
     }
 
     private static int parse(String s, int def) {
