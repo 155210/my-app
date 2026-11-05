@@ -238,6 +238,26 @@ final class Cfg {
         return partial != null ? partial : node;
     }
 
+    /** 指定节点：每行一个，写节点名的一部分或出口国家（如「美国」）都行；留空 = 不检查 */
+    static String allowedNodes(Context c) {
+        return sp(c).getString("allowedNodes", "");
+    }
+
+    /** 节点名（原名或改后的名）或出口位置包含任意一行就算指定节点；两样都读不到时不报错 */
+    static boolean nodeAllowed(Context c, String node, String exit) {
+        String list = allowedNodes(c).trim();
+        if (list.isEmpty() || (node == null && exit == null)) return true;
+        String aliased = node == null ? null : alias(c, node);
+        for (String line : list.split("\n")) {
+            String k = line.trim();
+            if (k.isEmpty()) continue;
+            if (node != null && node.contains(k)) return true;
+            if (aliased != null && aliased.contains(k)) return true;
+            if (exit != null && exit.contains(k)) return true;
+        }
+        return false;
+    }
+
     /** 最近读到的原始节点名，设置页显示出来方便抄 */
     static void saveLastNode(Context c, String node) {
         if (!node.equals(sp(c).getString("lastNode", null)))

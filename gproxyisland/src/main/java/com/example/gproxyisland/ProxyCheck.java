@@ -39,6 +39,13 @@ final class ProxyCheck {
         String apiErr;
         /** 出口位置（Cloudflare trace 的 loc + colo），比如「美国 LAX」；不存 IP */
         String exit;
+        /** 开着，但节点 / 出口不在设置里指定的列表里 */
+        boolean wrongNode;
+
+        /** 开着且是指定节点 */
+        boolean ok() {
+            return on() && !wrongNode;
+        }
 
         boolean on() {
             // 通知可能被用户关掉，所以通知不在时仍看其他迹象
@@ -82,6 +89,7 @@ final class ProxyCheck {
             }
         }
         if (s.on()) s.exit = exit(s.node);
+        if (s.on()) s.wrongNode = !Cfg.nodeAllowed(c, s.node, s.exit);
         if (s.node != null) {
             Cfg.saveLastNode(c, s.node);
             s.node = Cfg.nodeShown(c, s.node);
