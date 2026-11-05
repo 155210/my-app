@@ -500,6 +500,7 @@ public class IslandService extends Service {
             for (String q : quotaLines) {
                 TextView t = text(12, 0xFFB4B2A9, false);
                 t.setMaxWidth(max);
+                t.setSingleLine(false);
                 t.setPadding(0, dp(5), 0, 0);
                 t.setText(q);
                 detail.addView(t);
