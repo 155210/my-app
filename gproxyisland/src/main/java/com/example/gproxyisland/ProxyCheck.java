@@ -37,6 +37,8 @@ final class ProxyCheck {
         /** 通知监听连着；notif = NekoBox 常驻通知在 */
         boolean listening, notif;
         String apiErr;
+        /** 出口位置（Cloudflare trace 的 loc + colo），比如「美国 LAX」；不存 IP */
+        String exit;
 
         boolean on() {
             // 通知可能被用户关掉，所以通知不在时仍看其他迹象
@@ -79,6 +81,7 @@ final class ProxyCheck {
                 s.apiErr = e.getMessage() == null ? e.toString() : e.getMessage();
             }
         }
+        if (s.on()) s.exit = exit(s.node);
         if (s.node != null) {
             Cfg.saveLastNode(c, s.node);
             s.node = Cfg.nodeShown(c, s.node);
@@ -129,6 +132,59 @@ final class ProxyCheck {
             name = now;
         }
         return name;
+    }
+
+    // 只在轮询线程用
+    private static String exitText, exitNode;
+    private static long exitAt;
+
+    /** 走代理访问 Cloudflare trace，拿出口国家和机房。节点变了立刻重查，否则 5 分钟一次，失败 1 分钟后再试 */
+    private static String exit(String node) {
+        long now = System.currentTimeMillis();
+        boolean changed = node != null && !node.equals(exitNode);
+        long ttl = exitText == null ? 60_000 : 300_000;
+        if (!changed && now - exitAt < ttl) return exitText;
+        exitAt = now;
+        exitNode = node;
+        try {
+            String loc = null, colo = null;
+            for (String line : get("https://www.cloudflare.com/cdn-cgi/trace", null).split("\n")) {
+                if (line.startsWith("loc=")) loc = line.substring(4).trim();
+                else if (line.startsWith("colo=")) colo = line.substring(5).trim();
+            }
+            exitText = loc == null ? null : country(loc) + (colo == null || colo.isEmpty() ? "" : " " + colo);
+        } catch (Exception e) {
+            if (changed) exitText = null;
+        }
+        return exitText;
+    }
+
+    private static String country(String cc) {
+        switch (cc) {
+            case "US": return "美国";
+            case "JP": return "日本";
+            case "HK": return "香港";
+            case "TW": return "台湾";
+            case "SG": return "新加坡";
+            case "KR": return "韩国";
+            case "GB": return "英国";
+            case "DE": return "德国";
+            case "FR": return "法国";
+            case "NL": return "荷兰";
+            case "CA": return "加拿大";
+            case "AU": return "澳大利亚";
+            case "MY": return "马来西亚";
+            case "TH": return "泰国";
+            case "VN": return "越南";
+            case "PH": return "菲律宾";
+            case "IN": return "印度";
+            case "RU": return "俄罗斯";
+            case "TR": return "土耳其";
+            case "AE": return "阿联酋";
+            case "CN": return "中国大陆";
+            case "MO": return "澳门";
+            default: return cc;
+        }
     }
 
     private static String get(String url, String secret) throws Exception {
