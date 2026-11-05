@@ -26,7 +26,7 @@ import java.util.List;
 
 /** 设置页：填 gproxy 地址和账号，授权悬浮窗，开关悬浮岛 */
 public class MainActivity extends Activity {
-    private EditText url, user, pass, interval, recent, budget, naiKey, clashApi, clashSecret, nodeAlias;
+    private EditText url, user, pass, interval, recent, budget, naiKey, clashApi, clashSecret, nodeAlias, allowedNodes;
     private CheckBox proxyCheck;
     private TextView naiText;
     private Button naiProbe;
@@ -103,6 +103,12 @@ public class MainActivity extends Activity {
             });
             box.addView(ln);
         }
+        allowedNodes = field(box, "指定节点（每行一个；写节点名的一部分、改后的名字或出口国家如「美国」都行。换到别的节点岛变红并提醒；留空不检查）",
+                Cfg.allowedNodes(this), InputType.TYPE_CLASS_TEXT);
+        allowedNodes.setSingleLine(false);
+        allowedNodes.setMinLines(2);
+        allowedNodes.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+        allowedNodes.setHint("例：港1\n美国");
         debug = check(box, "展开时显示调试信息（刷新次数、最新记录、上游日志开关、错误）", Cfg.debug(this));
 
         TextView logTip = label("想看到「生成中」：gproxy 要同时打开「上游日志」和「上游日志正文」。"
@@ -526,6 +532,7 @@ public class MainActivity extends Activity {
                 .putString("clashApi", clashApi.getText().toString().trim())
                 .putString("clashSecret", clashSecret.getText().toString().trim())
                 .putString("nodeAlias", nodeAlias.getText().toString().trim())
+                .putString("allowedNodes", allowedNodes.getText().toString().trim())
                 .putFloat("budget", Math.max(0f, parseF(budget.getText().toString())))
                 .putString("naiKey", naiKey.getText().toString().trim())
                 .apply();

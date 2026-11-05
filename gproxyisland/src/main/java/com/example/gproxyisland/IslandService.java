@@ -426,11 +426,12 @@ public class IslandService extends Service {
                         + (r.cost >= 0 ? " · " + Cfg.money(r.cost) : ""));
             }
         } else {
-            boolean proxyOff = proxy != null && !proxy.on();
-            dotBg.setColor(proxyOff ? RED : baseColor());
+            boolean proxyBad = proxy != null && !proxy.ok();
+            dotBg.setColor(proxyBad ? RED : baseColor());
             head.setText(expanded
                     ? "今日 " + summary.requests + " 次 · " + costText()
-                    : (proxyOff ? "⚠ 代理没开 · " : "") + costText() + " · " + summary.requests + "次");
+                    : (proxyBad ? (proxy.on() ? "⚠ 代理错误 · " : "⚠ 代理没开 · ") : "")
+                    + costText() + " · " + summary.requests + "次");
         }
 
         if (pulsing) {
@@ -503,12 +504,12 @@ public class IslandService extends Service {
                 detail.addView(t);
             }
             if (proxy != null) {
-                TextView t = text(12, proxy.on() ? 0xFFB4B2A9 : RED, false);
+                TextView t = text(12, proxy.ok() ? 0xFFB4B2A9 : RED, false);
                 t.setMaxWidth(max);
                 t.setSingleLine(false);
                 t.setPadding(0, dp(5), 0, 0);
                 t.setText(proxy.on()
-                        ? "代理已开" + (proxy.exit != null ? " · 出口 " + proxy.exit : "") + (proxy.node != null ? " · 节点 " + proxy.node
+                        ? (proxy.wrongNode ? "⚠ 代理错误：不是指定节点" : "代理已开") + (proxy.exit != null ? " · 出口 " + proxy.exit : "") + (proxy.node != null ? " · 节点 " + proxy.node
                         : (proxy.nodeType != null ? " · " + proxy.nodeType : "")
                         + (!proxy.listening
                         ? (Cfg.listenerGranted(this)
@@ -680,7 +681,7 @@ public class IslandService extends Service {
         } else if (ioProxy == null || now - ioProxyAt >= PROXY_MS) {
             ioProxy = ProxyCheck.check(this);
             ioProxyAt = now;
-            boolean on = ioProxy.on();
+            boolean on = ioProxy.ok();
             proxyAlert = ioProxyWasOn && !on;
             ioProxyWasOn = on;
         }
@@ -757,7 +758,9 @@ public class IslandService extends Service {
             if (fql != null) quotaLines = fql;
             proxy = fproxy;
             if (fproxyAlert) {
-                Toast.makeText(this, "代理没开：NekoBox 没在运行", Toast.LENGTH_LONG).show();
+                Toast.makeText(this, fproxy != null && fproxy.on()
+                        ? "代理错误：当前不是指定节点" + (fproxy.node != null ? "（" + fproxy.node + "）" : "")
+                        : "代理没开：NekoBox 没在运行", Toast.LENGTH_LONG).show();
                 buzz(new long[]{0, 200, 120, 200});
             }
             if (ferr != null && ferr.startsWith("连不上")) {
