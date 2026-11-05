@@ -54,7 +54,7 @@ public class IslandService extends Service {
     private static final int NID = 1;
 
     private static final int GREEN = 0xFF5DCAA5, AMBER = 0xFFEF9F27, RED = 0xFFE24B4A, GREY = 0xFF888780;
-    private static final long FAST_MS = 2000, ACTIVE_TAIL_MS = 20000, POP_MS = 15000;
+    private static final long FAST_MS = 2000, ACTIVE_TAIL_MS = 20000, POP_MS = 15000, PROXY_MS = 10000;
     /** 多久读一次 gproxy 日志开关、额度历史 */
     private static final long FLAGS_MS = 60000, QUOTA_MS = 60000;
     /** 预算提醒线 */
@@ -80,6 +80,10 @@ public class IslandService extends Service {
     private GproxyClient.LogFlags ioFlags;
     private final Diag ioDiag = new Diag();
     private volatile boolean wantQuota;
+    private ProxyCheck.State ioProxy;
+    private long ioProxyAt;
+    /** 代理从开着变成没开时提醒一次 */
+    private boolean ioProxyWasOn = true;
 
     // ── 只在 ui 线程用 ──
     private volatile boolean expanded;
@@ -95,6 +99,7 @@ public class IslandService extends Service {
     private List<String> quotaLines = new ArrayList<>();
     /** 岛上「查询额度」的状态，null = 空闲 */
     private String probeMsg;
+    private ProxyCheck.State proxy;
     private boolean probing;
     private String enableMsg;
 
@@ -414,10 +419,11 @@ public class IslandService extends Service {
                         + (r.cost >= 0 ? " · " + Cfg.money(r.cost) : ""));
             }
         } else {
-            dotBg.setColor(baseColor());
+            boolean proxyOff = proxy != null && !proxy.on();
+            dotBg.setColor(proxyOff ? RED : baseColor());
             head.setText(expanded
                     ? "今日 " + summary.requests + " 次 · " + costText()
-                    : costText() + " · " + summary.requests + "次");
+                    : (proxyOff ? "⚠ 代理没开 · " : "") + costText() + " · " + summary.requests + "次");
         }
 
         if (pulsing) {
@@ -487,6 +493,17 @@ public class IslandService extends Service {
             if (summary != null && records.isEmpty() && Cfg.recent(this) > 0) {
                 TextView t = text(12, GREY, false);
                 t.setText("今天还没有请求");
+                detail.addView(t);
+            }
+            if (proxy != null) {
+                TextView t = text(12, proxy.on() ? 0xFFB4B2A9 : RED, false);
+                t.setMaxWidth(max);
+                t.setSingleLine(false);
+                t.setPadding(0, dp(5), 0, 0);
+                t.setText(proxy.on()
+                        ? "代理已开" + (proxy.node != null ? " · 节点 " + proxy.node
+                        : proxy.api ? "" : " · 节点看不到（NekoBox 里打开「启用 Clash API」）")
+                        : "⚠ 代理没开（NekoBox 没启动？）");
                 detail.addView(t);
             }
             if (flags != null && !flags.live()) {
@@ -643,6 +660,16 @@ public class IslandService extends Service {
         String err = null;
         ioDiag.polls++;
         ioDiag.lastPollAt = now;
+        boolean proxyAlert = false;
+        if (!Cfg.proxyCheck(this)) {
+            ioProxy = null;
+        } else if (ioProxy == null || now - ioProxyAt >= PROXY_MS) {
+            ioProxy = ProxyCheck.check(this);
+            ioProxyAt = now;
+            boolean on = ioProxy.on();
+            proxyAlert = ioProxyWasOn && !on;
+            ioProxyWasOn = on;
+        }
         try {
             rs = client.recent(Math.max(5, Cfg.recent(this)));
             // 列表按开始时间排，长请求完成时不一定在第一条：出现了上次没见过的 id 就算有新完成
@@ -707,11 +734,18 @@ public class IslandService extends Service {
         final GproxyClient.LogFlags fflags = ioFlags;
         final Diag fdiag = ioDiag.copy();
         final List<String> fql = ql;
+        final ProxyCheck.State fproxy = ioProxy;
+        final boolean fproxyAlert = proxyAlert;
         ui.post(() -> {
             error = ferr;
             diag = fdiag;
             if (fflags != null) flags = fflags;
             if (fql != null) quotaLines = fql;
+            proxy = fproxy;
+            if (fproxyAlert) {
+                Toast.makeText(this, "代理没开：NekoBox 没在运行", Toast.LENGTH_LONG).show();
+                buzz(new long[]{0, 200, 120, 200});
+            }
             if (ferr != null && ferr.startsWith("连不上")) {
                 summary = null;
                 flights = new ArrayList<>();

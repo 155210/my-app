@@ -26,7 +26,8 @@ import java.util.List;
 
 /** 设置页：填 gproxy 地址和账号，授权悬浮窗，开关悬浮岛 */
 public class MainActivity extends Activity {
-    private EditText url, user, pass, interval, recent, budget, naiKey;
+    private EditText url, user, pass, interval, recent, budget, naiKey, clashApi, clashSecret;
+    private CheckBox proxyCheck;
     private TextView naiText;
     private Button naiProbe;
     private CheckBox pop, vibrate, drag, debug;
@@ -71,6 +72,11 @@ public class MainActivity extends Activity {
         pop = check(box, "请求完成/失败时胶囊短暂提示（绿灯/红灯）", Cfg.pop(this));
         vibrate = check(box, "预算提醒和请求失败时震动", Cfg.vibrate(this));
         drag = check(box, "解锁位置，允许拖动悬浮岛（不勾 = 锁定在顶部居中）", Cfg.draggable(this));
+        proxyCheck = check(box, "检测代理（NekoBox）有没有开，没开岛变红并震动提醒", Cfg.proxyCheck(this));
+        clashApi = field(box, "NekoBox Clash API 地址（看当前节点用；要在 NekoBox 设置里打开「启用 Clash API」，留空不读节点）",
+                Cfg.clashApi(this), InputType.TYPE_TEXT_VARIATION_URI);
+        clashSecret = field(box, "Clash API 密钥（一般留空）", Cfg.clashSecret(this),
+                InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
         debug = check(box, "展开时显示调试信息（刷新次数、最新记录、上游日志开关、错误）", Cfg.debug(this));
 
         TextView logTip = label("想看到「生成中」：gproxy 要同时打开「上游日志」和「上游日志正文」。"
@@ -464,6 +470,9 @@ public class MainActivity extends Activity {
                 .putBoolean("vibrate", vibrate.isChecked())
                 .putBoolean("drag", drag.isChecked())
                 .putBoolean("debug", debug.isChecked())
+                .putBoolean("proxyCheck", proxyCheck.isChecked())
+                .putString("clashApi", clashApi.getText().toString().trim())
+                .putString("clashSecret", clashSecret.getText().toString().trim())
                 .putFloat("budget", Math.max(0f, parseF(budget.getText().toString())))
                 .putString("naiKey", naiKey.getText().toString().trim())
                 .apply();
