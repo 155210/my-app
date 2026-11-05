@@ -83,9 +83,58 @@ final class Cfg {
             if (n >= 3) break;
         }
         if (n == 0) return q.at > 0 ? "无读数 · " + when(q.at) + " 查询" : "还没查询过";
+        for (GproxyClient.QuotaRow r : q.rows) {
+            long t = exhaustAt(r, q.at);
+            if (t > 0) b.append(" · ⚠").append(r.name).append(" 按此速度").append(day(t)).append("用完");
+        }
         if (q.blockedUntil > System.currentTimeMillis()) b.append(" · 限流到 ").append(hm(q.blockedUntil));
         if (q.at > 0) b.append(" · ").append(when(q.at)).append(" 查询");
         return b.toString();
+    }
+
+    /** 窗口长度：5小时 / 7天…，认不出 = 0 */
+    static long windowMs(String name) {
+        if (name == null) return 0;
+        if (name.startsWith("5小时")) return 5 * 3600_000L;
+        if (name.startsWith("7天")) return 7 * 86400_000L;
+        if (name.startsWith("每天")) return 86400_000L;
+        return 0;
+    }
+
+    /**
+     * 按目前的速度（窗口开始到读数时间，线性）预计什么时候用完。
+     * 只有会早于重置时间用完才返回时间，否则 0。读数太少（<3% 或窗口刚开始 10 分钟内）不算。
+     */
+    static long exhaustAt(GproxyClient.QuotaRow r, long at) {
+        if (r.percent < 3 || r.percent >= 100 || r.resetAt <= 0) return 0;
+        long start = r.startAt;
+        long len = windowMs(r.name);
+        if (len > 0 && (start <= 0 || r.resetAt - start > len + 3600_000L)) start = r.resetAt - len;
+        if (start <= 0) return 0;
+        long t0 = at > 0 ? at : System.currentTimeMillis();
+        long elapsed = t0 - start;
+        if (elapsed < 10 * 60_000L) return 0;
+        long t = start + (long) (elapsed * 100.0 / r.percent);
+        return t < r.resetAt && t > System.currentTimeMillis() - 3600_000L ? t : 0;
+    }
+
+    /** 今天 09:00 / 明天 09:00 / 周一 09:00 */
+    static String day(long ms) {
+        java.util.Calendar a = java.util.Calendar.getInstance(), b = java.util.Calendar.getInstance();
+        b.setTimeInMillis(ms);
+        int d = (int) ((startOfDay(b) - startOfDay(a)) / 86400_000L);
+        String w = d == 0 ? "今天" : d == 1 ? "明天" : d == 2 ? "后天"
+                : "周" + "日一二三四五六".charAt(b.get(java.util.Calendar.DAY_OF_WEEK) - 1);
+        return w + " " + hm(ms);
+    }
+
+    private static long startOfDay(java.util.Calendar c) {
+        java.util.Calendar x = (java.util.Calendar) c.clone();
+        x.set(java.util.Calendar.HOUR_OF_DAY, 0);
+        x.set(java.util.Calendar.MINUTE, 0);
+        x.set(java.util.Calendar.SECOND, 0);
+        x.set(java.util.Calendar.MILLISECOND, 0);
+        return x.getTimeInMillis();
     }
 
     static String quotaValue(GproxyClient.QuotaRow r) {
