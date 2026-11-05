@@ -213,6 +213,18 @@ final class Cfg {
         return sp(c).getString("nodeAlias", "");
     }
 
+    /** 岛上显示用：改过名就显示新名，没改名只露前 3 个字，防截图泄露 */
+    static String nodeShown(Context c, String node) {
+        String a = alias(c, node);
+        return a.equals(node) ? mask(node) : a;
+    }
+
+    static String mask(String s) {
+        s = s.trim();
+        int n = s.codePointCount(0, s.length());
+        return n <= 3 ? s : s.substring(0, s.offsetByCodePoints(0, 3)) + "…";
+    }
+
     static String alias(Context c, String node) {
         String partial = null;
         for (String line : nodeAlias(c).split("\n")) {

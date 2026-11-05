@@ -81,7 +81,7 @@ final class ProxyCheck {
         }
         if (s.node != null) {
             Cfg.saveLastNode(c, s.node);
-            s.node = Cfg.alias(c, s.node);
+            s.node = Cfg.nodeShown(c, s.node);
         }
         return s;
     }
