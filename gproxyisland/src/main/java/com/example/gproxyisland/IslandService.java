@@ -1,6 +1,8 @@
 package com.example.gproxyisland;
 
 import android.animation.LayoutTransition;
+import android.animation.ObjectAnimator;
+import android.animation.ValueAnimator;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -20,6 +22,8 @@ import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.VibrationEffect;
+import android.os.Vibrator;
 import android.provider.Settings;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -35,9 +39,14 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 前台服务：在屏幕顶部画一颗黑色胶囊（悬浮窗），定时读 gproxy 用量。
- * 点一下展开/收起，按住拖动换位置；有新请求时胶囊会短暂显示这次的模型和花费。
- * 熄屏时暂停刷新，亮屏马上刷新一次。
+ * 前台服务：在屏幕顶部画一颗黑色胶囊（悬浮窗），读 gproxy 用量。
+ *
+ * 收起时按优先级显示：
+ *   刚完成/刚失败的提示（6 秒，绿灯/红灯）＞ 生成中（黄灯闪烁 + 计时）＞ 今日花费。
+ * 状态点：绿 = 正常；黄 = 到预算提醒线；红 = 超预算或最近一次失败；灰 = 连不上 gproxy。
+ *
+ * 刷新：空闲按设置的间隔；有请求在跑或刚跑完的 20 秒内每 2 秒一次。熄屏暂停。
+ * 「生成中」读 gproxy 上游日志里 state = in_progress 的行，需要在 gproxy 控制台打开「上游日志」。
  */
 public class IslandService extends Service {
     static final String ACTION_STOP = "com.example.gproxyisland.STOP";
@@ -45,6 +54,9 @@ public class IslandService extends Service {
     private static final int NID = 1;
 
     private static final int GREEN = 0xFF5DCAA5, AMBER = 0xFFEF9F27, RED = 0xFFE24B4A, GREY = 0xFF888780;
+    private static final long FAST_MS = 2000, ACTIVE_TAIL_MS = 20000, POP_MS = 6000;
+    /** 预算提醒线 */
+    private static final double WARN_RATIO = 0.8;
 
     private WindowManager wm;
     private WindowManager.LayoutParams lp;
@@ -52,16 +64,24 @@ public class IslandService extends Service {
     private TextView head;
     private View dot;
     private GradientDrawable bg, dotBg;
+    private ObjectAnimator blink;
 
     private final Handler ui = new Handler(Looper.getMainLooper());
     private HandlerThread worker;
     private Handler io;
     private GproxyClient client;
 
-    private boolean expanded, screenOn = true, popping;
-    private String lastSeenId;
+    // ── 只在 io 线程用 ──
+    private String ioLastId;
+    private long ioSummaryAt, ioActiveUntil;
+
+    // ── 只在 ui 线程用 ──
+    private boolean expanded;
+    private volatile boolean screenOn = true;
     private GproxyClient.Summary summary;
     private List<GproxyClient.Record> records = new ArrayList<>();
+    private List<GproxyClient.Flight> flights = new ArrayList<>();
+    private GproxyClient.Record popRecord;
     private String error;
     private long updatedAt;
 
@@ -125,6 +145,7 @@ public class IslandService extends Service {
         if (io != null) io.removeCallbacksAndMessages(null);
         if (worker != null) worker.quitSafely();
         ui.removeCallbacksAndMessages(null);
+        if (blink != null) blink.cancel();
         if (root != null && wm != null) {
             try {
                 wm.removeView(root);
@@ -165,7 +186,7 @@ public class IslandService extends Service {
         return Math.round(TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, getResources().getDisplayMetrics()));
     }
 
-    /** 岛最高能放到哪：状态栏高度再往下 2dp */
+    /** 岛最高能放到哪：状态栏是系统下拉手势区，放进去就点不到，所以最高到状态栏下沿再往下 2dp */
     private int minY() {
         int h = 0;
         int id = getResources().getIdentifier("status_bar_height", "dimen", "android");
@@ -217,6 +238,11 @@ public class IslandService extends Service {
         detail.setPadding(0, dp(6), 0, dp(2));
         root.addView(detail);
 
+        blink = ObjectAnimator.ofFloat(dot, "alpha", 1f, 0.25f);
+        blink.setDuration(600);
+        blink.setRepeatCount(ValueAnimator.INFINITE);
+        blink.setRepeatMode(ValueAnimator.REVERSE);
+
         int type = Build.VERSION.SDK_INT >= 26
                 ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
                 : WindowManager.LayoutParams.TYPE_PHONE;
@@ -229,9 +255,15 @@ public class IslandService extends Service {
                         | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
                 PixelFormat.TRANSLUCENT);
         lp.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
-        lp.x = Cfg.sp(this).getInt("x", 0);
-        // 状态栏那一条是系统的下拉手势区，岛放进去就点不到、拖不动，所以最高只到状态栏下沿
-        lp.y = Math.max(minY(), Cfg.sp(this).getInt("y", minY() + dp(4)));
+        final boolean draggable = Cfg.draggable(this);
+        if (draggable) {
+            lp.x = Cfg.sp(this).getInt("x", 0);
+            lp.y = Math.max(minY(), Cfg.sp(this).getInt("y", minY() + dp(4)));
+        } else {
+            // 锁定：顶部居中，紧贴状态栏下方
+            lp.x = 0;
+            lp.y = minY() + dp(4);
+        }
         if (Build.VERSION.SDK_INT >= 28) {
             lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
         }
@@ -255,7 +287,7 @@ public class IslandService extends Service {
                     case MotionEvent.ACTION_MOVE:
                         float mx = e.getRawX() - downX, my = e.getRawY() - downY;
                         if (!drag && Math.hypot(mx, my) > slop) drag = true;
-                        if (drag) {
+                        if (drag && draggable) {
                             int half = Math.max(0, (getResources().getDisplayMetrics().widthPixels - root.getWidth()) / 2);
                             lp.x = Math.max(-half, Math.min(half, startX + Math.round(mx)));
                             lp.y = Math.max(minY(), startY + Math.round(my));
@@ -267,12 +299,17 @@ public class IslandService extends Service {
                         return true;
                     case MotionEvent.ACTION_UP:
                         if (drag) {
-                            Cfg.sp(IslandService.this).edit().putInt("x", lp.x).putInt("y", lp.y).apply();
+                            if (draggable) {
+                                Cfg.sp(IslandService.this).edit().putInt("x", lp.x).putInt("y", lp.y).apply();
+                            }
                         } else {
                             expanded = !expanded;
-                            popping = false;
+                            popRecord = null;
                             render();
-                            if (expanded) io.post(once);
+                            if (expanded) {
+                                io.removeCallbacks(poll);
+                                io.post(poll);
+                            }
                         }
                         return true;
                     default:
@@ -284,27 +321,73 @@ public class IslandService extends Service {
         wm.addView(root, lp);
     }
 
+    private int failStreak() {
+        int n = 0;
+        for (GproxyClient.Record r : records) {
+            if (!r.failed()) break;
+            n++;
+        }
+        return n;
+    }
+
+    /** 正常状态的点颜色：预算、失败 */
+    private int baseColor() {
+        if (failStreak() > 0) return RED;
+        float budget = Cfg.budget(this);
+        if (budget > 0 && summary != null) {
+            double ratio = summary.cost / budget;
+            if (ratio >= 1) return RED;
+            if (ratio >= WARN_RATIO) return AMBER;
+        }
+        return error != null ? RED : GREEN;
+    }
+
+    private String costText() {
+        float budget = Cfg.budget(this);
+        String c = Cfg.money(summary.cost);
+        return budget > 0 ? c + "/" + Cfg.money(budget) : c;
+    }
+
     private void render() {
         if (root == null) return;
+        long now = System.currentTimeMillis();
         int max = getResources().getDisplayMetrics().widthPixels - dp(48);
         head.setMaxWidth(max);
+        boolean pulsing = false;
 
-        if (error != null && summary == null) {
-            dotBg.setColor(error.startsWith("连不上") ? GREY : RED);
-            head.setText(error);
-        } else if (summary == null) {
-            dotBg.setColor(GREY);
-            head.setText("gproxy 连接中…");
-        } else if (popping && !expanded && !records.isEmpty()) {
-            GproxyClient.Record r = records.get(0);
-            dotBg.setColor(r.failed() ? RED : AMBER);
-            head.setText(Cfg.model(r.model) + (r.cost >= 0 ? " · " + Cfg.money(r.cost) : "")
-                    + (r.failed() ? " · 失败" : ""));
+        if (summary == null) {
+            dotBg.setColor(error != null && !error.startsWith("连不上") ? RED : GREY);
+            head.setText(error != null ? error : "gproxy 连接中…");
+        } else if (popRecord != null && !expanded) {
+            GproxyClient.Record r = popRecord;
+            dotBg.setColor(r.failed() ? RED : GREEN);
+            if (r.failed()) {
+                head.setText("✗ " + Cfg.model(r.model) + " 失败");
+            } else {
+                String d = Cfg.dur(r.durationMs);
+                head.setText("✓ " + Cfg.model(r.model)
+                        + (d.isEmpty() ? "" : " · " + d)
+                        + (r.cost >= 0 ? " · " + Cfg.money(r.cost) : ""));
+            }
+        } else if (!flights.isEmpty() && !expanded) {
+            GproxyClient.Flight f = flights.get(0);
+            dotBg.setColor(AMBER);
+            pulsing = true;
+            head.setText((f.responding ? "生成中 · " : "等待中 · ") + Cfg.model(f.model)
+                    + " · " + Cfg.secs(now - f.startedAt)
+                    + (flights.size() > 1 ? " +" + (flights.size() - 1) : ""));
         } else {
-            dotBg.setColor(error != null ? RED : GREEN);
+            dotBg.setColor(baseColor());
             head.setText(expanded
-                    ? "今日 " + summary.requests + " 次 · " + Cfg.money(summary.cost)
-                    : Cfg.money(summary.cost) + " · " + summary.requests + "次");
+                    ? "今日 " + summary.requests + " 次 · " + costText()
+                    : costText() + " · " + summary.requests + "次");
+        }
+
+        if (pulsing) {
+            if (!blink.isStarted()) blink.start();
+        } else if (blink.isStarted()) {
+            blink.cancel();
+            dot.setAlpha(1f);
         }
 
         detail.removeAllViews();
@@ -316,6 +399,25 @@ public class IslandService extends Service {
                         + " · 缓存 " + Cfg.w(summary.cached)
                         + (updatedAt > 0 ? " · " + Cfg.hm(updatedAt) + " 更新" : ""));
                 detail.addView(s);
+
+                float budget = Cfg.budget(this);
+                if (budget > 0) {
+                    double ratio = summary.cost / budget;
+                    TextView b = text(12, ratio >= 1 ? RED : ratio >= WARN_RATIO ? AMBER : 0xFFB4B2A9, false);
+                    b.setMaxWidth(max);
+                    b.setText("预算 " + Cfg.money(summary.cost) + " / " + Cfg.money(budget)
+                            + " · " + Math.round(ratio * 100) + "%"
+                            + (ratio >= 1 ? " · 已超" : ratio >= WARN_RATIO ? " · 快到了" : ""));
+                    detail.addView(b);
+                }
+            }
+            int fails = failStreak();
+            if (fails > 0) {
+                TextView t = text(12, RED, false);
+                t.setMaxWidth(max);
+                t.setText(fails >= records.size() && fails > 1
+                        ? "最近 " + fails + " 次都失败了" : "最近连续失败 " + fails + " 次");
+                detail.addView(t);
             }
             if (error != null && summary != null) {
                 TextView e = text(12, RED, false);
@@ -323,51 +425,120 @@ public class IslandService extends Service {
                 e.setText(error);
                 detail.addView(e);
             }
-            for (GproxyClient.Record r : records) {
+            for (GproxyClient.Flight f : flights) {
+                TextView t = text(12, AMBER, false);
+                t.setMaxWidth(max);
+                t.setPadding(0, dp(5), 0, 0);
+                t.setText("▶ " + (f.responding ? "生成中 " : "等待中 ") + Cfg.model(f.model)
+                        + " · " + Cfg.secs(now - f.startedAt));
+                detail.addView(t);
+                pulsing = true;
+            }
+            int show = Math.min(Cfg.recent(this), records.size());
+            for (int i = 0; i < show; i++) {
+                GproxyClient.Record r = records.get(i);
                 TextView t = text(12, r.failed() ? 0xFFF09595 : 0xFFF1EFE8, false);
                 t.setMaxWidth(max);
                 t.setPadding(0, dp(5), 0, 0);
+                String d = Cfg.dur(r.durationMs);
                 t.setText(Cfg.hm(r.startedAt) + "  " + Cfg.model(r.model)
                         + "  入" + Cfg.w(r.input) + " 出" + Cfg.w(r.output)
                         + (r.cost >= 0 ? "  " + Cfg.money(r.cost) : "")
-                        + (r.failed() ? "  失败" : ""));
+                        + (r.failed() ? "  失败" : d.isEmpty() ? "" : "  " + d));
                 detail.addView(t);
             }
             if (summary != null && records.isEmpty() && Cfg.recent(this) > 0) {
-                TextView t = text(12, 0xFF888780, false);
+                TextView t = text(12, GREY, false);
                 t.setText("今天还没有请求");
                 detail.addView(t);
             }
         }
         detail.setVisibility(expanded ? View.VISIBLE : View.GONE);
         bg.setCornerRadius(expanded ? dp(20) : dp(18));
+
+        // 有请求在跑时每秒刷新计时
+        ui.removeCallbacks(tick);
+        if (!flights.isEmpty()) ui.postDelayed(tick, 1000);
+    }
+
+    private final Runnable tick = this::render;
+
+    private final Runnable endPop = () -> {
+        popRecord = null;
+        render();
+    };
+
+    // ───────────── 提醒 ─────────────
+
+    private void buzz(long[] pattern) {
+        if (!Cfg.vibrate(this)) return;
+        try {
+            Vibrator v = getSystemService(Vibrator.class);
+            if (v != null && v.hasVibrator()) v.vibrate(VibrationEffect.createWaveform(pattern, -1));
+        } catch (Exception ignored) {
+        }
+    }
+
+    /** 跨过预算提醒线/上限时提醒一次（每天每档一次） */
+    private void checkBudget() {
+        float budget = Cfg.budget(this);
+        if (budget <= 0 || summary == null) return;
+        double ratio = summary.cost / budget;
+        int level = ratio >= 1 ? 2 : ratio >= WARN_RATIO ? 1 : 0;
+        if (level == 0) return;
+        String key = Cfg.today() + ":" + level;
+        if (key.equals(Cfg.sp(this).getString("budgetAlert", ""))
+                || (level == 1 && (Cfg.today() + ":2").equals(Cfg.sp(this).getString("budgetAlert", "")))) {
+            return;
+        }
+        Cfg.sp(this).edit().putString("budgetAlert", key).apply();
+        Toast.makeText(this, level == 2
+                ? "gproxy 今日已超预算：" + Cfg.money(summary.cost) + " / " + Cfg.money(budget)
+                : "gproxy 今日已用 " + Math.round(ratio * 100) + "% 预算：" + Cfg.money(summary.cost),
+                Toast.LENGTH_LONG).show();
+        buzz(level == 2 ? new long[]{0, 120, 120, 120, 120, 120} : new long[]{0, 120, 120, 120});
     }
 
     // ───────────── 刷新 ─────────────
 
-    private final Runnable once = this::fetch;
-
     private final Runnable poll = new Runnable() {
         @Override
         public void run() {
-            fetch();
-            if (screenOn) io.postDelayed(this, Cfg.interval(IslandService.this) * 1000L);
+            boolean active = fetch();
+            if (!screenOn) return;
+            long delay = active ? FAST_MS : Cfg.interval(IslandService.this) * 1000L;
+            io.postDelayed(this, delay);
         }
     };
 
-    private final Runnable endPop = () -> {
-        popping = false;
-        render();
-    };
-
-    /** 在后台线程跑 */
-    private void fetch() {
+    /** 在后台线程跑；返回「现在是活跃期」，用来决定下次多久后刷新 */
+    private boolean fetch() {
+        long now = System.currentTimeMillis();
         GproxyClient.Summary s = null;
         List<GproxyClient.Record> rs = null;
+        List<GproxyClient.Flight> fl = null;
+        GproxyClient.Record fresh = null;
         String err = null;
         try {
-            s = client.today();
-            rs = client.recent(Math.max(1, Cfg.recent(this)));
+            rs = client.recent(Math.max(3, Cfg.recent(this)));
+            String newest = rs.isEmpty() ? "" : rs.get(0).id;
+            boolean changed = ioLastId != null && !newest.isEmpty() && !newest.equals(ioLastId);
+            if (changed) {
+                fresh = rs.get(0);
+                ioActiveUntil = now + ACTIVE_TAIL_MS;
+            }
+            boolean first = ioLastId == null;
+            ioLastId = newest;
+            if (first || changed || now - ioSummaryAt >= Cfg.interval(this) * 1000L) {
+                s = client.today();
+                ioSummaryAt = now;
+            }
+            try {
+                fl = client.inflight();
+            } catch (Exception ignored) {
+                fl = new ArrayList<>();
+            }
+            if (!fl.isEmpty()) ioActiveUntil = now + ACTIVE_TAIL_MS;
         } catch (java.net.ConnectException | java.net.SocketTimeoutException e) {
             err = "连不上 gproxy，没在运行？";
         } catch (Exception e) {
@@ -375,32 +546,33 @@ public class IslandService extends Service {
         }
         final GproxyClient.Summary fs = s;
         final List<GproxyClient.Record> frs = rs;
+        final List<GproxyClient.Flight> ffl = fl;
+        final GproxyClient.Record ffresh = fresh;
         final String ferr = err;
         ui.post(() -> {
             error = ferr;
+            if (ferr != null && ferr.startsWith("连不上")) {
+                summary = null;
+                flights = new ArrayList<>();
+            }
             if (fs != null) {
                 summary = fs;
                 updatedAt = System.currentTimeMillis();
-            } else if (ferr != null && ferr.startsWith("连不上")) {
-                summary = null;
+                checkBudget();
             }
-            if (frs != null) {
-                String newest = frs.isEmpty() ? null : frs.get(0).id;
-                boolean fresh = lastSeenId != null && newest != null && !newest.equals(lastSeenId);
-                if (newest != null) lastSeenId = newest;
-                else if (lastSeenId == null) lastSeenId = "";
-                int keep = Cfg.recent(this);
-                records = new ArrayList<>(frs.subList(0, Math.min(keep, frs.size())));
-                if (keep == 0 && !frs.isEmpty()) records = new ArrayList<>(frs.subList(0, 1));
-                if (fresh && Cfg.pop(this) && !expanded) {
-                    popping = true;
+            if (frs != null) records = frs;
+            if (ffl != null) flights = ffl;
+            if (ffresh != null) {
+                if (ffresh.failed()) buzz(new long[]{0, 60, 80, 60});
+                if (Cfg.pop(this) && !expanded) {
+                    popRecord = ffresh;
                     ui.removeCallbacks(endPop);
-                    ui.postDelayed(endPop, 6000);
+                    ui.postDelayed(endPop, POP_MS);
                 }
-                if (keep == 0 && !popping) records.clear();
             }
             render();
         });
+        return now < ioActiveUntil;
     }
 
     private final BroadcastReceiver screen = new BroadcastReceiver() {

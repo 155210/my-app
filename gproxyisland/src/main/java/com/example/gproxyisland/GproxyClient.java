@@ -29,7 +29,7 @@ class GproxyClient {
     static class Record {
         String id, model, state;
         long startedAt;
-        long input = -1, output = -1;
+        long input = -1, output = -1, durationMs = -1;
         double cost = -1;
 
         boolean failed() {
@@ -95,7 +95,38 @@ class GproxyClient {
                 if (!t.isNull("outputTokens")) r.output = t.optLong("outputTokens", -1);
             }
             if (!o.isNull("cost")) r.cost = parse(o.optString("cost", "-1"));
+            if (!o.isNull("durationMs")) r.durationMs = o.optLong("durationMs", -1);
             out.add(r);
+        }
+        return out;
+    }
+
+    /** 一条正在进行的上游请求 */
+    static class Flight {
+        String id, model;
+        long startedAt;
+        /** 已经收到首字 */
+        boolean responding;
+    }
+
+    /**
+     * 正在进行的请求。来自上游日志（state = in_progress），
+     * gproxy 控制台没开「上游日志」时这里永远是空的。
+     */
+    List<Flight> inflight() throws IOException {
+        long from = System.currentTimeMillis() - 30 * 60 * 1000L;
+        JSONArray items = json(get("/admin/api/logs/upstream?limit=10&fromMs=" + from)).optJSONArray("items");
+        List<Flight> out = new ArrayList<>();
+        if (items == null) return out;
+        for (int i = 0; i < items.length(); i++) {
+            JSONObject o = items.optJSONObject(i);
+            if (o == null || !"in_progress".equals(o.optString("state"))) continue;
+            Flight f = new Flight();
+            f.id = o.optString("requestId", "");
+            f.model = o.isNull("model") ? "?" : o.optString("model", "?");
+            f.startedAt = o.optLong("startedAtMs");
+            f.responding = !o.isNull("firstResponseAtMs");
+            out.add(f);
         }
         return out;
     }

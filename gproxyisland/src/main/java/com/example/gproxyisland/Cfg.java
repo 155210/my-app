@@ -30,9 +30,9 @@ final class Cfg {
         return sp(c).getString("pass", "");
     }
 
-    /** 刷新间隔（秒），最少 10 */
+    /** 空闲时的刷新间隔（秒），最少 5；有请求在跑时自动加快到 2 秒 */
     static int interval(Context c) {
-        return Math.max(10, sp(c).getInt("interval", 30));
+        return Math.max(5, sp(c).getInt("interval", 15));
     }
 
     /** 展开后显示最近几次，0~10 */
@@ -40,13 +40,32 @@ final class Cfg {
         return Math.max(0, Math.min(10, sp(c).getInt("recent", 3)));
     }
 
-    /** 有新请求时弹出提示 */
+    /** 请求完成/失败时胶囊短暂提示 */
     static boolean pop(Context c) {
         return sp(c).getBoolean("pop", true);
     }
 
+    /** 预算提醒、失败时震动 */
+    static boolean vibrate(Context c) {
+        return sp(c).getBoolean("vibrate", true);
+    }
+
+    /** 每日预算（美元），0 = 不提醒 */
+    static float budget(Context c) {
+        return Math.max(0f, sp(c).getFloat("budget", 0f));
+    }
+
+    /** 允许拖动；默认锁定在顶部居中 */
+    static boolean draggable(Context c) {
+        return sp(c).getBoolean("drag", false);
+    }
+
     static boolean enabled(Context c) {
         return sp(c).getBoolean("enabled", false);
+    }
+
+    static String today() {
+        return new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(new Date());
     }
 
     /** 1.53万 风格；≥1万 保留一位小数 */
@@ -65,6 +84,20 @@ final class Cfg {
 
     static String hm(long ms) {
         return new SimpleDateFormat("HH:mm", Locale.US).format(new Date(ms));
+    }
+
+    /** 12s / 1m05s */
+    static String secs(long ms) {
+        long s = Math.max(0, ms / 1000);
+        if (s < 60) return s + "s";
+        return (s / 60) + "m" + String.format(Locale.US, "%02d", s % 60) + "s";
+    }
+
+    /** 完成耗时：12.3s */
+    static String dur(long ms) {
+        if (ms < 0) return "";
+        if (ms < 60000) return String.format(Locale.US, "%.1fs", ms / 1000.0);
+        return secs(ms);
     }
 
     static String model(String m) {
