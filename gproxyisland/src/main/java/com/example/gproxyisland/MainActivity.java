@@ -26,7 +26,7 @@ import java.util.List;
 
 /** 设置页：填 gproxy 地址和账号，授权悬浮窗，开关悬浮岛 */
 public class MainActivity extends Activity {
-    private EditText url, user, pass, interval, recent, budget, naiKey, clashApi, clashSecret;
+    private EditText url, user, pass, interval, recent, budget, naiKey, clashApi, clashSecret, nodeAlias;
     private CheckBox proxyCheck;
     private TextView naiText;
     private Button naiProbe;
@@ -63,6 +63,7 @@ public class MainActivity extends Activity {
         box.addView(updMsg);
         upd.setOnClickListener(v -> checkUpdate(upd, updMsg, true));
         checkUpdate(upd, updMsg, false);
+        new Thread(() -> Updater.cleanup(this)).start();
 
         url = field(box, "gproxy 地址", Cfg.url(this), InputType.TYPE_TEXT_VARIATION_URI);
         user = field(box, "管理员用户名", Cfg.user(this), InputType.TYPE_CLASS_TEXT);
@@ -85,6 +86,23 @@ public class MainActivity extends Activity {
                 Cfg.clashApi(this), InputType.TYPE_TEXT_VARIATION_URI);
         clashSecret = field(box, "Clash API 密钥（一般留空）", Cfg.clashSecret(this),
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        String last = Cfg.lastNode(this);
+        nodeAlias = field(box, "节点改名（每行一条「原名=新名」；原名可以只写一部分）。没改名的节点岛上只显示前 3 个字",
+                Cfg.nodeAlias(this), InputType.TYPE_CLASS_TEXT);
+        nodeAlias.setSingleLine(false);
+        nodeAlias.setMinLines(2);
+        nodeAlias.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+        nodeAlias.setHint("例：香港 IEPL 01=港1");
+        if (!last.isEmpty()) {
+            TextView ln = label("最近读到的节点：" + Cfg.mask(last) + "（点一下显示全名）", 12, MUTED);
+            ln.setPadding(0, dp(4), 0, 0);
+            boolean[] shown = {false};
+            ln.setOnClickListener(v -> {
+                shown[0] = !shown[0];
+                ln.setText("最近读到的节点：" + (shown[0] ? last : Cfg.mask(last) + "（点一下显示全名）"));
+            });
+            box.addView(ln);
+        }
         debug = check(box, "展开时显示调试信息（刷新次数、最新记录、上游日志开关、错误）", Cfg.debug(this));
 
         TextView logTip = label("想看到「生成中」：gproxy 要同时打开「上游日志」和「上游日志正文」。"
@@ -507,6 +525,7 @@ public class MainActivity extends Activity {
                 .putBoolean("proxyCheck", proxyCheck.isChecked())
                 .putString("clashApi", clashApi.getText().toString().trim())
                 .putString("clashSecret", clashSecret.getText().toString().trim())
+                .putString("nodeAlias", nodeAlias.getText().toString().trim())
                 .putFloat("budget", Math.max(0f, parseF(budget.getText().toString())))
                 .putString("naiKey", naiKey.getText().toString().trim())
                 .apply();

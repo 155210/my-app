@@ -508,7 +508,7 @@ public class IslandService extends Service {
                 t.setSingleLine(false);
                 t.setPadding(0, dp(5), 0, 0);
                 t.setText(proxy.on()
-                        ? "代理已开" + (proxy.node != null ? " · 节点 " + proxy.node
+                        ? "代理已开" + (proxy.exit != null ? " · 出口 " + proxy.exit : "") + (proxy.node != null ? " · 节点 " + proxy.node
                         : (proxy.nodeType != null ? " · " + proxy.nodeType : "")
                         + (!proxy.listening
                         ? (Cfg.listenerGranted(this)

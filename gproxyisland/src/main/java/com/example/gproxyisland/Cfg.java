@@ -208,6 +208,46 @@ final class Cfg {
         return s;
     }
 
+    /** 节点改名：每行「原名=新名」。先整名精确匹配，没有再看原名里是否包含左边那段 */
+    static String nodeAlias(Context c) {
+        return sp(c).getString("nodeAlias", "");
+    }
+
+    /** 岛上显示用：改过名就显示新名，没改名只露前 3 个字，防截图泄露 */
+    static String nodeShown(Context c, String node) {
+        String a = alias(c, node);
+        return a.equals(node) ? mask(node) : a;
+    }
+
+    static String mask(String s) {
+        s = s.trim();
+        int n = s.codePointCount(0, s.length());
+        return n <= 3 ? s : s.substring(0, s.offsetByCodePoints(0, 3)) + "…";
+    }
+
+    static String alias(Context c, String node) {
+        String partial = null;
+        for (String line : nodeAlias(c).split("\n")) {
+            int k = line.indexOf('=');
+            if (k <= 0) continue;
+            String from = line.substring(0, k).trim(), to = line.substring(k + 1).trim();
+            if (from.isEmpty() || to.isEmpty()) continue;
+            if (from.equals(node.trim())) return to;
+            if (partial == null && node.contains(from)) partial = to;
+        }
+        return partial != null ? partial : node;
+    }
+
+    /** 最近读到的原始节点名，设置页显示出来方便抄 */
+    static void saveLastNode(Context c, String node) {
+        if (!node.equals(sp(c).getString("lastNode", null)))
+            sp(c).edit().putString("lastNode", node).apply();
+    }
+
+    static String lastNode(Context c) {
+        return sp(c).getString("lastNode", "");
+    }
+
     static String clashSecret(Context c) {
         return sp(c).getString("clashSecret", "");
     }
