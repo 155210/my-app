@@ -1,0 +1,59 @@
+name: Build gproxy 岛 APK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'gproxyisland/**'
+      - '.github/workflows/gproxyisland.yml'
+  # PR 上只打包、上传到 Actions 附件，不发 Release
+  pull_request:
+    paths:
+      - 'gproxyisland/**'
+      - '.github/workflows/gproxyisland.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  LANG: C.UTF-8
+  LC_ALL: C.UTF-8
+  JAVA_TOOL_OPTIONS: -Dfile.encoding=UTF-8 -Dsun.jnu.encoding=UTF-8
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+
+      # ubuntu 运行器自带 Android SDK（$ANDROID_HOME），无需额外安装
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: 打包 gproxy 岛 APK
+        run: gradle :gproxyisland:assembleRelease --no-daemon
+
+      - name: 改名
+        run: cp gproxyisland/build/outputs/apk/release/*.apk GproxyIsland.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GproxyIsland
+          path: GproxyIsland.apk
+
+      # 发布到 Releases：手机浏览器打开仓库 Releases 页面就能直接下载 APK
+      - name: 发布
+        if: github.event_name != 'pull_request'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: gproxyisland-${{ github.run_number }}
+          name: gproxy 岛 build ${{ github.run_number }}
+          make_latest: true
+          files: GproxyIsland.apk

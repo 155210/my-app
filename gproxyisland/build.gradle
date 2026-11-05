@@ -1,0 +1,45 @@
+plugins {
+    id 'com.android.application'
+}
+
+// 每次 Actions 构建自动递增版本号
+def runNumber = (System.getenv('GITHUB_RUN_NUMBER') ?: '1').toInteger()
+
+android {
+    namespace 'com.example.gproxyisland'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.example.gproxyisland'
+        minSdk 26
+        targetSdk 34
+        versionCode runNumber
+        versionName "1.0.${runNumber}"
+    }
+
+    // 固定签名：新版可直接覆盖安装，设置保留
+    signingConfigs {
+        fixed {
+            storeFile file('gproxyisland.keystore')
+            storePassword 'island123'
+            keyAlias 'gproxyisland'
+            keyPassword 'island123'
+        }
+    }
+
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.fixed
+        }
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.fixed
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+        encoding 'UTF-8'
+    }
+}
