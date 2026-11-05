@@ -39,6 +39,12 @@ final class Cfg {
     }
 
     /** 展开岛最下面显示调试信息 */
+    /** 系统设置里给了本 App 通知使用权（不代表已经连上） */
+    static boolean listenerGranted(Context c) {
+        String s = android.provider.Settings.Secure.getString(c.getContentResolver(), "enabled_notification_listeners");
+        return s != null && s.contains(c.getPackageName());
+    }
+
     static boolean debug(Context c) {
         return sp(c).getBoolean("debug", true);
     }

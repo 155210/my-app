@@ -12,6 +12,8 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- 预算、失败提醒 -->
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- 设置页「检查更新」下载后调起安装 -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
         android:allowBackup="true"
