@@ -732,7 +732,7 @@ public class IslandService extends Service {
                 GproxyClient.Quota q = Cfg.bestQuota(this, c.id, client.quotaHistory(c.id));
                 String line = Cfg.quotaLine(q);
                 if (line == null) continue;
-                out.add("额度 " + c.name + " · " + line);
+                out.add("额度 " + c.shortName + " · " + line);
                 if (out.size() >= 4) break;
             }
         } catch (Exception ignored) {

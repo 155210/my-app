@@ -172,6 +172,8 @@ class GproxyClient {
 
     static class Cred {
         String id, providerId, name, status;
+        /** 岛上用的短名：provider + 账户名前 3 位，避免整个邮箱撑满一行 */
+        String shortName;
         boolean enabled;
     }
 
@@ -222,6 +224,8 @@ class GproxyClient {
             c.enabled = o.optBoolean("enabled", true);
             String pn = names.get(c.providerId);
             String label = str(o, "label");
+            String head = pn != null ? pn : c.id.length() > 8 ? c.id.substring(0, 8) : c.id;
+            c.shortName = label != null ? head + " · " + label.substring(0, Math.min(3, label.length())) : head;
             c.name = label != null ? (pn != null ? pn + " · " + label : label)
                     : (pn != null ? pn : c.id.length() > 8 ? c.id.substring(0, 8) : c.id);
             out.add(c);
