@@ -110,8 +110,9 @@ class GproxyClient {
     }
 
     /**
-     * 正在进行的请求。来自上游日志（state = in_progress），
-     * gproxy 控制台没开「上游日志」时这里永远是空的。
+     * 正在进行的请求。来自上游日志（state = in_progress）。
+     * gproxy 只有「上游日志」和「上游日志正文」都开着时，才会在请求进行中把这一行写进库
+     * （只开上游日志 = 只记元数据，要等请求结束才一次性写入），否则这里永远是空的。
      */
     List<Flight> inflight() throws IOException {
         long from = System.currentTimeMillis() - 30 * 60 * 1000L;
@@ -131,15 +132,233 @@ class GproxyClient {
         return out;
     }
 
+
+    // ───────────── 日志设置 ─────────────
+
+    /** gproxy 的日志开关：「生成中」要上游日志 + 上游日志正文都开 */
+    static class LogFlags {
+        boolean upstream, upstreamBody;
+
+        boolean live() {
+            return upstream && upstreamBody;
+        }
+    }
+
+    LogFlags logFlags() throws IOException {
+        JSONObject l = json(get("/admin/api/settings")).optJSONObject("logging");
+        LogFlags f = new LogFlags();
+        if (l != null) {
+            f.upstream = l.optBoolean("enableUpstreamLog");
+            f.upstreamBody = l.optBoolean("enableUpstreamLogBody");
+        }
+        return f;
+    }
+
+    /** 打开上游日志和上游日志正文（PATCH /admin/api/settings，只改这两项） */
+    LogFlags enableLiveLog() throws IOException {
+        JSONObject body = new JSONObject();
+        try {
+            JSONObject l = new JSONObject();
+            l.put("enableUpstreamLog", true);
+            l.put("enableUpstreamLogBody", true);
+            body.put("logging", l);
+        } catch (Exception ignored) {
+        }
+        call("PATCH", "/admin/api/settings", body.toString(), 15000);
+        return logFlags();
+    }
+
+    // ───────────── 上游额度 ─────────────
+
+    static class Cred {
+        String id, providerId, name, status;
+        boolean enabled;
+    }
+
+    /** 一行额度：一个窗口/余额 */
+    static class QuotaRow {
+        String name;
+        /** 0~100，未知 = -1 */
+        double percent = -1;
+        String used, limit, remaining, unit;
+        /** 重置/结束时间，未知 = 0 */
+        long resetAt;
+    }
+
+    static class Quota {
+        /** 读数时间（上次查询时间），没查过 = 0 */
+        long at;
+        List<QuotaRow> rows = new ArrayList<>();
+        /** 被上游挡住到什么时候，没有 = 0 */
+        long blockedUntil;
+    }
+
+    /** 凭据列表，名字优先用 label，其次 provider 名 */
+    List<Cred> credentials() throws IOException {
+        java.util.Map<String, String> names = new java.util.HashMap<>();
+        try {
+            JSONArray ps = json(get("/admin/api/providers?page=1&pageSize=200")).optJSONArray("items");
+            if (ps != null) {
+                for (int i = 0; i < ps.length(); i++) {
+                    JSONObject p = ps.optJSONObject(i);
+                    if (p == null) continue;
+                    String n = str(p, "displayName");
+                    if (n == null) n = str(p, "name");
+                    names.put(p.optString("id"), n == null ? p.optString("id") : n);
+                }
+            }
+        } catch (IOException ignored) {
+        }
+        List<Cred> out = new ArrayList<>();
+        JSONArray items = json(get("/admin/api/credentials?page=1&pageSize=200")).optJSONArray("items");
+        if (items == null) return out;
+        for (int i = 0; i < items.length(); i++) {
+            JSONObject o = items.optJSONObject(i);
+            if (o == null) continue;
+            Cred c = new Cred();
+            c.id = o.optString("id");
+            c.providerId = o.optString("providerId");
+            c.status = o.optString("status", "");
+            c.enabled = o.optBoolean("enabled", true);
+            String pn = names.get(c.providerId);
+            String label = str(o, "label");
+            c.name = label != null ? (pn != null ? pn + " · " + label : label)
+                    : (pn != null ? pn : c.id.length() > 8 ? c.id.substring(0, 8) : c.id);
+            out.add(c);
+        }
+        return out;
+    }
+
+    /** 历史：gproxy 已存的最近读数（不请求上游） */
+    Quota quotaHistory(String credId) throws IOException {
+        JSONObject o = json(get("/admin/api/credentials/" + enc(credId) + "/quota"));
+        Quota q = new Quota();
+        JSONArray cycles = o.optJSONArray("cycles");
+        if (cycles != null) {
+            java.util.Set<String> seen = new java.util.HashSet<>();
+            for (int i = 0; i < cycles.length(); i++) {
+                JSONObject c = cycles.optJSONObject(i);
+                if (c == null || !c.isNull("closedAtMs")) continue;
+                String w = c.optString("windowId");
+                if (!seen.add(w)) continue;
+                QuotaRow r = new QuotaRow();
+                r.name = windowName(w);
+                if (!c.isNull("endsAtMs")) r.resetAt = c.optLong("endsAtMs");
+                JSONObject s = c.optJSONObject("sample");
+                if (s != null) {
+                    r.percent = num(str(s, "usedPercent"));
+                    r.used = str(s, "used");
+                    r.limit = str(s, "limit");
+                    q.at = Math.max(q.at, s.optLong("atMs"));
+                }
+                q.rows.add(r);
+            }
+        }
+        q.blockedUntil = blocks(o.optJSONArray("blocks"));
+        return q;
+    }
+
+    /** 查询：让 gproxy 去问上游（可能有频率限制，只在用户点「查询」时调） */
+    Quota quotaProbe(String credId) throws IOException {
+        JSONObject o = json(call("POST", "/admin/api/credentials/" + enc(credId) + "/quota-probe", null, 30000));
+        return parseSnapshot(o);
+    }
+
+    static Quota parseSnapshot(JSONObject o) {
+        Quota q = new Quota();
+        q.at = o.optLong("observedAtMs");
+        JSONArray es = o.optJSONArray("entries");
+        if (es == null) return q;
+        for (int i = 0; i < es.length(); i++) {
+            JSONObject e = es.optJSONObject(i);
+            if (e == null) continue;
+            String kind = e.optString("kind");
+            if ("breakdown".equals(kind)) continue;
+            QuotaRow r = new QuotaRow();
+            String label = str(e, "label");
+            r.name = label != null ? label : windowName(e.optString("id"));
+            JSONObject a = e.optJSONObject("allowance");
+            JSONObject b = e.optJSONObject("balance");
+            if (a != null) {
+                if (a.optBoolean("unlimited")) r.remaining = "不限";
+                r.percent = num(str(a, "usedPercent"));
+                r.used = str(a, "used");
+                r.limit = str(a, "limit");
+                if (r.remaining == null) r.remaining = str(a, "remaining");
+                r.unit = str(a, "unit");
+                if (!a.isNull("periodEndMs")) r.resetAt = a.optLong("periodEndMs");
+            } else if (b != null) {
+                r.name = label != null ? label : "余额";
+                r.remaining = str(b, "remaining");
+                r.unit = str(b, "unit");
+            }
+            q.rows.add(r);
+        }
+        return q;
+    }
+
+    private static long blocks(JSONArray bs) {
+        long until = 0;
+        if (bs == null) return 0;
+        for (int i = 0; i < bs.length(); i++) {
+            JSONObject b = bs.optJSONObject(i);
+            if (b != null) until = Math.max(until, b.optLong("untilMs"));
+        }
+        return until;
+    }
+
+    /** five_hour → 5小时 之类，认不出就原样 */
+    static String windowName(String id) {
+        if (id == null || id.isEmpty()) return "额度";
+        String s = id.toLowerCase();
+        if (s.contains("five_hour") || s.equals("5h")) return "5小时";
+        if (s.contains("seven_day") || s.equals("7d") || s.contains("week")) {
+            if (s.contains("opus")) return "7天 Opus";
+            if (s.contains("sonnet")) return "7天 Sonnet";
+            return "7天";
+        }
+        if (s.contains("day") || s.equals("1d")) return "每天";
+        if (s.contains("month")) return "每月";
+        return id;
+    }
+
+    private static String str(JSONObject o, String k) {
+        if (o == null || o.isNull(k)) return null;
+        String v = o.optString(k, null);
+        return v == null || v.isEmpty() ? null : v;
+    }
+
+    private static double num(String s) {
+        if (s == null) return -1;
+        try {
+            return Double.parseDouble(s);
+        } catch (Exception e) {
+            return -1;
+        }
+    }
+
+    private static String enc(String s) {
+        try {
+            return java.net.URLEncoder.encode(s, "UTF-8").replace("+", "%20");
+        } catch (Exception e) {
+            return s;
+        }
+    }
+
     private String get(String path) throws IOException {
+        return call("GET", path, null, 8000);
+    }
+
+    /** 带登录的请求：没有 token 先登录；401/403 重新登录再试一次 */
+    private String call(String method, String path, String body, int readTimeout) throws IOException {
         if (token == null) login();
         try {
-            return request("GET", path, null);
+            return request(method, path, body, readTimeout);
         } catch (HttpError e) {
             if (e.code != 401 && e.code != 403) throw e;
             token = null;
             login();
-            return request("GET", path, null);
+            return request(method, path, body, readTimeout);
         }
     }
 
@@ -152,7 +371,7 @@ class GproxyClient {
         }
         String r;
         try {
-            r = request("POST", "/portal/api/login", body.toString());
+            r = request("POST", "/portal/api/login", body.toString(), 8000);
         } catch (HttpError e) {
             if (e.code == 401 || e.code == 403) throw new HttpError(e.code, "登录失败，检查用户名和密码");
             throw e;
@@ -162,14 +381,16 @@ class GproxyClient {
         token = t;
     }
 
-    private String request(String method, String path, String body) throws IOException {
+    private String request(String method, String path, String body, int readTimeout) throws IOException {
         HttpURLConnection c = (HttpURLConnection) new URL(base + path).openConnection();
         try {
             c.setConnectTimeout(4000);
-            c.setReadTimeout(8000);
+            c.setReadTimeout(readTimeout);
             c.setRequestMethod(method);
             c.setRequestProperty("accept", "application/json");
             if (token != null) c.setRequestProperty("cookie", "gproxy_session=" + token);
+            // cookie 认证的 POST/PATCH 要过 gproxy 的同源检查：Origin 必须和 Host 一致
+            if (!"GET".equals(method)) c.setRequestProperty("origin", origin());
             if (body != null) {
                 byte[] b = body.getBytes(StandardCharsets.UTF_8);
                 c.setDoOutput(true);
@@ -195,6 +416,16 @@ class GproxyClient {
             return text;
         } finally {
             c.disconnect();
+        }
+    }
+
+    /** http://127.0.0.1:8787/xxx → http://127.0.0.1:8787 */
+    private String origin() {
+        try {
+            URL u = new URL(base);
+            return u.getProtocol() + "://" + u.getHost() + (u.getPort() >= 0 ? ":" + u.getPort() : "");
+        } catch (Exception e) {
+            return base;
         }
     }
 
