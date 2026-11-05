@@ -502,7 +502,8 @@ public class IslandService extends Service {
                 t.setPadding(0, dp(5), 0, 0);
                 t.setText(proxy.on()
                         ? "代理已开" + (proxy.node != null ? " · 节点 " + proxy.node
-                        : proxy.api ? "" : " · 节点看不到（NekoBox 里打开「启用 Clash API」）")
+                        : (proxy.nodeType != null ? " · " + proxy.nodeType : "")
+                        + " · 节点名要在设置里给「通知使用权」")
                         : "⚠ 代理没开（NekoBox 没启动？）");
                 detail.addView(t);
             }
