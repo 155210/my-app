@@ -30,11 +30,17 @@ final class ProxyCheck {
 
     static class State {
         boolean vpn, tun, api;
+        /** 从 NekoBox 通知读到的节点名（最准） */
         String node;
+        /** Clash API 里 proxy 出站的协议，比如 VLESS（读不到名字时退而求其次） */
+        String nodeType;
+        /** 通知监听连着；notif = NekoBox 常驻通知在 */
+        boolean listening, notif;
         String apiErr;
 
         boolean on() {
-            return vpn || tun || api;
+            // 通知可能被用户关掉，所以通知不在时仍看其他迹象
+            return notif || vpn || tun || api;
         }
     }
 
@@ -57,10 +63,17 @@ final class ProxyCheck {
             }
         } catch (Exception ignored) {
         }
+        s.listening = NodeListener.connected;
+        s.notif = NodeListener.nekoShown;
+        if (s.listening && s.notif) s.node = NodeListener.nodeTitle;
         String api = Cfg.clashApi(c);
         if (!api.isEmpty()) {
             try {
-                s.node = node(new JSONObject(get(api + "/proxies", Cfg.clashSecret(c))));
+                JSONObject o = new JSONObject(get(api + "/proxies", Cfg.clashSecret(c)));
+                if (s.node == null) s.node = node(o);
+                JSONObject ps = o.optJSONObject("proxies");
+                JSONObject p = ps == null ? null : ps.optJSONObject("proxy");
+                if (p != null) s.nodeType = p.optString("type", null);
                 s.api = true;
             } catch (Exception e) {
                 s.apiErr = e.getMessage() == null ? e.toString() : e.getMessage();

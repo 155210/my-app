@@ -33,6 +33,17 @@
             </intent-filter>
         </activity>
 
+        <!-- 只读 NekoBox 通知标题（节点名） -->
+        <service
+            android:name=".NodeListener"
+            android:exported="true"
+            android:label="gproxy 岛：读 NekoBox 节点名"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
         <service
             android:name=".IslandService"
             android:exported="false"
