@@ -139,6 +139,23 @@ final class Updater {
         else app.registerReceiver(r, f);
     }
 
+    /** 删掉已经装过（build ≤ 当前）的安装包，打开设置页时调用 */
+    static void cleanup(Context c) {
+        try {
+            java.io.File dir = c.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
+            java.io.File[] fs = dir == null ? null : dir.listFiles();
+            if (fs == null) return;
+            int cur = current(c);
+            for (java.io.File f : fs) {
+                String n = f.getName();
+                if (!n.startsWith("GproxyIsland-") || !n.endsWith(".apk")) continue;
+                int b;
+                try { b = Integer.parseInt(n.substring(13, n.length() - 4)); } catch (Exception e) { b = 0; }
+                if (b <= cur) f.delete();
+            }
+        } catch (Exception ignored) {}
+    }
+
     static void openBrowser(Context c, Latest l) {
         try {
             c.startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(PROXY + l.apk))

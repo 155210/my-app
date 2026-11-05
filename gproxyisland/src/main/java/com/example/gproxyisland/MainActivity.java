@@ -63,6 +63,7 @@ public class MainActivity extends Activity {
         box.addView(updMsg);
         upd.setOnClickListener(v -> checkUpdate(upd, updMsg, true));
         checkUpdate(upd, updMsg, false);
+        new Thread(() -> Updater.cleanup(this)).start();
 
         url = field(box, "gproxy 地址", Cfg.url(this), InputType.TYPE_TEXT_VARIATION_URI);
         user = field(box, "管理员用户名", Cfg.user(this), InputType.TYPE_CLASS_TEXT);
