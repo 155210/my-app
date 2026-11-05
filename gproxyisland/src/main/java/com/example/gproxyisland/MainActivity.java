@@ -110,6 +110,20 @@ public class MainActivity extends Activity {
             testResult.setText("已保存");
         });
 
+        Button reset = button(box, "悬浮岛位置复原（回到顶部居中）", false);
+        reset.setOnClickListener(v -> {
+            Cfg.sp(this).edit().remove("x").remove("y").apply();
+            if (IslandService.running) {
+                IslandService.stop(this);
+                toggle.postDelayed(() -> {
+                    IslandService.start(this);
+                    toggle.postDelayed(this::refresh, 300);
+                }, 300);
+            }
+            testResult.setTextColor(MUTED);
+            testResult.setText("位置已复原");
+        });
+
         Button app = button(box, "打开本应用的系统设置（自启动、省电策略）", false);
         app.setOnClickListener(v -> startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
                 Uri.parse("package:" + getPackageName()))));

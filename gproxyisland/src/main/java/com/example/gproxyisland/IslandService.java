@@ -165,6 +165,15 @@ public class IslandService extends Service {
         return Math.round(TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, getResources().getDisplayMetrics()));
     }
 
+    /** 岛最高能放到哪：状态栏高度再往下 2dp */
+    private int minY() {
+        int h = 0;
+        int id = getResources().getIdentifier("status_bar_height", "dimen", "android");
+        if (id > 0) h = getResources().getDimensionPixelSize(id);
+        if (h <= 0) h = dp(32);
+        return h + dp(2);
+    }
+
     private TextView text(float sp, int color, boolean bold) {
         TextView t = new TextView(this);
         t.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp);
@@ -221,7 +230,8 @@ public class IslandService extends Service {
                 PixelFormat.TRANSLUCENT);
         lp.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
         lp.x = Cfg.sp(this).getInt("x", 0);
-        lp.y = Cfg.sp(this).getInt("y", dp(40));
+        // 状态栏那一条是系统的下拉手势区，岛放进去就点不到、拖不动，所以最高只到状态栏下沿
+        lp.y = Math.max(minY(), Cfg.sp(this).getInt("y", minY() + dp(4)));
         if (Build.VERSION.SDK_INT >= 28) {
             lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
         }
@@ -246,8 +256,9 @@ public class IslandService extends Service {
                         float mx = e.getRawX() - downX, my = e.getRawY() - downY;
                         if (!drag && Math.hypot(mx, my) > slop) drag = true;
                         if (drag) {
-                            lp.x = startX + Math.round(mx);
-                            lp.y = Math.max(0, startY + Math.round(my));
+                            int half = Math.max(0, (getResources().getDisplayMetrics().widthPixels - root.getWidth()) / 2);
+                            lp.x = Math.max(-half, Math.min(half, startX + Math.round(mx)));
+                            lp.y = Math.max(minY(), startY + Math.round(my));
                             try {
                                 wm.updateViewLayout(root, lp);
                             } catch (Exception ignored) {
