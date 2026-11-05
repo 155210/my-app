@@ -26,7 +26,9 @@ import java.util.List;
 
 /** 设置页：填 gproxy 地址和账号，授权悬浮窗，开关悬浮岛 */
 public class MainActivity extends Activity {
-    private EditText url, user, pass, interval, recent, budget;
+    private EditText url, user, pass, interval, recent, budget, naiKey;
+    private TextView naiText;
+    private Button naiProbe;
     private CheckBox pop, vibrate, drag, debug;
     private TextView status, testResult, logState;
     private LinearLayout quotaBox;
@@ -161,6 +163,19 @@ public class MainActivity extends Activity {
         quotaBox.setOrientation(LinearLayout.VERTICAL);
         box.addView(quotaBox);
 
+        TextView nt = label("NovelAI 额度", 17, FG);
+        nt.setTypeface(Typeface.DEFAULT_BOLD);
+        nt.setPadding(0, dp(24), 0, dp(4));
+        box.addView(nt);
+        naiKey = field(box, "NovelAI API Key（只用来查额度，留空就不显示；和柏宝绘里填的是同一个）", Cfg.naiKey(this),
+                InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        naiText = label("", 13, FG);
+        naiText.setPadding(0, dp(8), 0, 0);
+        box.addView(naiText);
+        naiProbe = button(box, "查询 NovelAI 额度", false);
+        naiProbe.setOnClickListener(v -> probeNai());
+        showNai(NaiClient.last(this), null);
+
         TextView tip = label("小米手机建议：在系统设置里把本应用的「省电策略」设为「无限制」，否则锁屏久了可能被系统停掉。"
                 + "熄屏时悬浮岛会自动暂停刷新，不额外耗电。", 12, MUTED);
         tip.setPadding(0, dp(14), 0, 0);
@@ -224,6 +239,57 @@ public class MainActivity extends Activity {
     }
 
     // ───────────── 上游额度 ─────────────
+
+    private void showNai(NaiClient.Quota q, String err) {
+        StringBuilder b = new StringBuilder();
+        if (err != null) b.append("查询失败：").append(err).append("\n");
+        if (q == null) {
+            b.append("还没有查询记录");
+        } else {
+            b.append("订阅：").append(q.tier).append(q.active ? "" : "（未生效）");
+            if (q.expiresAt > 0) b.append("（到 ").append(new java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+                    .format(new java.util.Date(q.expiresAt))).append("）");
+            if (q.anlas >= 0) b.append("\nAnlas 余额：").append(NaiClient.anlas(q.anlas));
+            if (q.percent >= 0) {
+                b.append("\nV5 免费额度：").append(q.empty ? "已用完，再出 V5 会扣 Anlas"
+                        : "剩 " + Math.round(q.percent) + "%（约 " + Math.round(q.percent * NaiClient.IMAGES_PER_PERCENT) + " 张）");
+                String r = NaiClient.refill(q);
+                if (!r.isEmpty()) b.append("\n").append(r);
+                double now = NaiClient.nowPercent(q);
+                if (now >= 0 && Math.round(now) > Math.round(q.percent)) b.append("\n按回复速度估计现在约 ").append(Math.round(now)).append("%");
+            }
+            b.append("\n上次查询：").append(Cfg.when(q.at));
+        }
+        naiText.setTextColor(err != null ? 0xFFF09595 : FG);
+        naiText.setText(b.toString());
+    }
+
+    private void probeNai() {
+        save();
+        final String key = Cfg.naiKey(this);
+        if (key.isEmpty()) {
+            showNai(NaiClient.last(this), "先填 API Key");
+            return;
+        }
+        naiProbe.setEnabled(false);
+        naiProbe.setText("查询中…");
+        new Thread(() -> {
+            NaiClient.Quota q = null;
+            String err = null;
+            try {
+                q = NaiClient.probe(this, key);
+            } catch (Exception e) {
+                err = msg(e);
+            }
+            final NaiClient.Quota fq = q != null ? q : NaiClient.last(this);
+            final String fe = err;
+            runOnUiThread(() -> {
+                naiProbe.setEnabled(true);
+                naiProbe.setText("查询 NovelAI 额度");
+                showNai(fq, fe);
+            });
+        }).start();
+    }
 
     private void loadQuota() {
         quotaMsg.setTextColor(MUTED);
@@ -399,6 +465,7 @@ public class MainActivity extends Activity {
                 .putBoolean("drag", drag.isChecked())
                 .putBoolean("debug", debug.isChecked())
                 .putFloat("budget", Math.max(0f, parseF(budget.getText().toString())))
+                .putString("naiKey", naiKey.getText().toString().trim())
                 .apply();
     }
 

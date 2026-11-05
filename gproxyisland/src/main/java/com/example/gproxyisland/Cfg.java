@@ -185,6 +185,11 @@ final class Cfg {
         return sp(c).getBoolean("drag", false);
     }
 
+    /** NovelAI API Key，只用来查额度；空 = 不显示 NAI 额度 */
+    static String naiKey(Context c) {
+        return sp(c).getString("naiKey", "");
+    }
+
     static boolean enabled(Context c) {
         return sp(c).getBoolean("enabled", false);
     }

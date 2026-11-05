@@ -760,6 +760,16 @@ public class IslandService extends Service {
                 fail++;
                 lastErr = e.getMessage();
             }
+            String nk = Cfg.naiKey(this);
+            if (!nk.isEmpty()) {
+                try {
+                    NaiClient.probe(this, nk);
+                    ok++;
+                } catch (Exception e) {
+                    fail++;
+                    lastErr = "NAI " + e.getMessage();
+                }
+            }
             List<String> ql = quotaSummary();
             ioQuotaAt = System.currentTimeMillis();
             final String m = Cfg.hm(System.currentTimeMillis()) + " 已查 " + ok + " 个"
@@ -786,6 +796,10 @@ public class IslandService extends Service {
                 if (out.size() >= 4) break;
             }
         } catch (Exception ignored) {
+        }
+        if (!Cfg.naiKey(this).isEmpty()) {
+            NaiClient.Quota n = NaiClient.last(this);
+            out.add(n != null ? "额度 " + NaiClient.line(n) : "额度 NAI · 还没查询过");
         }
         return out;
     }
