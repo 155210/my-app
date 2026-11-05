@@ -190,6 +190,22 @@ final class Cfg {
         return sp(c).getString("naiKey", "");
     }
 
+    /** 检测代理（NekoBox）有没有开，没开就警告 */
+    static boolean proxyCheck(Context c) {
+        return sp(c).getBoolean("proxyCheck", false);
+    }
+
+    /** NekoBox 的 Clash API 地址（NekoBox 设置里「启用 Clash API」后是 127.0.0.1:9090）；空 = 不读节点 */
+    static String clashApi(Context c) {
+        String s = sp(c).getString("clashApi", "http://127.0.0.1:9090").trim();
+        while (s.endsWith("/")) s = s.substring(0, s.length() - 1);
+        return s;
+    }
+
+    static String clashSecret(Context c) {
+        return sp(c).getString("clashSecret", "");
+    }
+
     static boolean enabled(Context c) {
         return sp(c).getBoolean("enabled", false);
     }
