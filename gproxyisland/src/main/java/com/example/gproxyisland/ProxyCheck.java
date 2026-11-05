@@ -79,6 +79,10 @@ final class ProxyCheck {
                 s.apiErr = e.getMessage() == null ? e.toString() : e.getMessage();
             }
         }
+        if (s.node != null) {
+            Cfg.saveLastNode(c, s.node);
+            s.node = Cfg.alias(c, s.node);
+        }
         return s;
     }
 

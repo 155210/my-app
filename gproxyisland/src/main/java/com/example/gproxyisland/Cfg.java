@@ -208,6 +208,34 @@ final class Cfg {
         return s;
     }
 
+    /** 节点改名：每行「原名=新名」。先整名精确匹配，没有再看原名里是否包含左边那段 */
+    static String nodeAlias(Context c) {
+        return sp(c).getString("nodeAlias", "");
+    }
+
+    static String alias(Context c, String node) {
+        String partial = null;
+        for (String line : nodeAlias(c).split("\n")) {
+            int k = line.indexOf('=');
+            if (k <= 0) continue;
+            String from = line.substring(0, k).trim(), to = line.substring(k + 1).trim();
+            if (from.isEmpty() || to.isEmpty()) continue;
+            if (from.equals(node.trim())) return to;
+            if (partial == null && node.contains(from)) partial = to;
+        }
+        return partial != null ? partial : node;
+    }
+
+    /** 最近读到的原始节点名，设置页显示出来方便抄 */
+    static void saveLastNode(Context c, String node) {
+        if (!node.equals(sp(c).getString("lastNode", null)))
+            sp(c).edit().putString("lastNode", node).apply();
+    }
+
+    static String lastNode(Context c) {
+        return sp(c).getString("lastNode", "");
+    }
+
     static String clashSecret(Context c) {
         return sp(c).getString("clashSecret", "");
     }
