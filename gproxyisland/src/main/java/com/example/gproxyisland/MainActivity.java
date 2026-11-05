@@ -58,6 +58,12 @@ public class MainActivity extends Activity {
         sub.setPadding(0, dp(6), 0, dp(18));
         box.addView(sub);
 
+        Button upd = button(box, "检查更新（当前 build " + Updater.current(this) + "）", false);
+        TextView updMsg = label("", 12, MUTED);
+        box.addView(updMsg);
+        upd.setOnClickListener(v -> checkUpdate(upd, updMsg, true));
+        checkUpdate(upd, updMsg, false);
+
         url = field(box, "gproxy 地址", Cfg.url(this), InputType.TYPE_TEXT_VARIATION_URI);
         user = field(box, "管理员用户名", Cfg.user(this), InputType.TYPE_CLASS_TEXT);
         pass = field(box, "管理员密码", Cfg.pass(this),
@@ -606,6 +612,44 @@ public class MainActivity extends Activity {
         box.addView(e, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
         return e;
+    }
+
+    private Updater.Latest latest;
+
+    /** click=false：打开页面时静默查一次，有新版就把按钮改成「更新」 */
+    private void checkUpdate(Button upd, TextView msg, boolean click) {
+        int cur = Updater.current(this);
+        if (click && latest != null && latest.build > cur) {
+            if (!Updater.canInstall(this)) {
+                msg.setText("先打开「允许安装未知应用」，返回再点一次");
+                return;
+            }
+            msg.setText("下载中…（通知栏看进度，走 ghfast 代理）");
+            upd.setEnabled(false);
+            Updater.download(this, latest, m -> runOnUiThread(() -> {
+                msg.setText(m);
+                upd.setEnabled(true);
+            }));
+            return;
+        }
+        if (click) msg.setText("检查中…");
+        new Thread(() -> {
+            try {
+                Updater.Latest l = Updater.latest();
+                runOnUiThread(() -> {
+                    latest = l;
+                    if (l.build > cur) {
+                        upd.setText("有新版 build " + l.build + "，点这里更新（当前 " + cur + "）");
+                        msg.setText("");
+                    } else {
+                        upd.setText("检查更新（当前 build " + cur + "）");
+                        if (click) msg.setText("已经是最新版");
+                    }
+                });
+            } catch (Exception e) {
+                if (click) runOnUiThread(() -> msg.setText("检查失败：" + e.getMessage() + "（GitHub 要开代理）"));
+            }
+        }).start();
     }
 
     private Button button(LinearLayout box, String text, boolean primary) {
