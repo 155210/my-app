@@ -46,11 +46,13 @@ public class NodeListener extends NotificationListenerService {
             StatusBarNotification[] all = getActiveNotifications();
             if (all != null) {
                 for (StatusBarNotification s : all) {
-                    if (!NEKO.equals(s.getPackageName()) || !s.isOngoing()) continue;
-                    shown = true;
+                    if (!NEKO.equals(s.getPackageName())) continue;
+                    // 有的系统前台服务通知不带 ongoing 标记，所以不强求；有常驻的就优先用常驻的标题
                     Bundle ex = s.getNotification().extras;
                     CharSequence t = ex == null ? null : ex.getCharSequence(Notification.EXTRA_TITLE);
-                    if (t != null && t.length() > 0) title = t.toString();
+                    if (t == null || t.length() == 0) { shown = true; continue; }
+                    if (title == null || s.isOngoing()) title = t.toString();
+                    shown = true;
                 }
             }
         } catch (Exception ignored) {

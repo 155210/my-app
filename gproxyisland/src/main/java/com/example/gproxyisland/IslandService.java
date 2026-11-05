@@ -145,6 +145,13 @@ public class IslandService extends Service {
     @Override
     public void onCreate() {
         super.onCreate();
+        // 刚给完通知使用权时系统有时不立即绑定，这里请求重绑一次
+        if (Cfg.listenerGranted(this) && !NodeListener.connected) {
+            try {
+                android.service.notification.NotificationListenerService.requestRebind(
+                        new android.content.ComponentName(this, NodeListener.class));
+            } catch (Exception ignored) {}
+        }
         goForeground();
         if (!Settings.canDrawOverlays(this)) {
             Toast.makeText(this, "没有悬浮窗权限，先在 App 里授权", Toast.LENGTH_LONG).show();
@@ -503,7 +510,13 @@ public class IslandService extends Service {
                 t.setText(proxy.on()
                         ? "代理已开" + (proxy.node != null ? " · 节点 " + proxy.node
                         : (proxy.nodeType != null ? " · " + proxy.nodeType : "")
-                        + " · 节点名要在设置里给「通知使用权」")
+                        + (!proxy.listening
+                        ? (Cfg.listenerGranted(this)
+                        ? " · 通知使用权已给但还没连上，关掉岛再开（不行就重启手机）"
+                        : " · 节点名要在设置里给「通知使用权」")
+                        : !proxy.notif
+                        ? " · 没看到 NekoBox 通知（在系统里把 NekoBox 的通知打开）"
+                        : " · NekoBox 通知里没有标题"))
                         : "⚠ 代理没开（NekoBox 没启动？）");
                 detail.addView(t);
             }

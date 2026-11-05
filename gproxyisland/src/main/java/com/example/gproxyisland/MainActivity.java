@@ -488,8 +488,7 @@ public class MainActivity extends Activity {
     }
 
     private boolean listenerOn() {
-        String s = Settings.Secure.getString(getContentResolver(), "enabled_notification_listeners");
-        return s != null && s.contains(getPackageName());
+        return Cfg.listenerGranted(this);
     }
 
     private void save() {
