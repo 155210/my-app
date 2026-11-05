@@ -193,6 +193,8 @@ class GproxyClient {
         List<QuotaRow> rows = new ArrayList<>();
         /** 被上游挡住到什么时候，没有 = 0 */
         long blockedUntil;
+        /** 查询（probe）的原始返回，用来存到本机；历史读数为 null */
+        String raw;
     }
 
     /** 凭据列表，名字优先用 label，其次 provider 名 */
@@ -264,8 +266,10 @@ class GproxyClient {
 
     /** 查询：让 gproxy 去问上游（可能有频率限制，只在用户点「查询」时调） */
     Quota quotaProbe(String credId) throws IOException {
-        JSONObject o = json(call("POST", "/admin/api/credentials/" + enc(credId) + "/quota-probe", null, 30000));
-        return parseSnapshot(o);
+        String raw = call("POST", "/admin/api/credentials/" + enc(credId) + "/quota-probe", null, 30000);
+        Quota q = parseSnapshot(json(raw));
+        q.raw = raw;
+        return q;
     }
 
     static Quota parseSnapshot(JSONObject o) {

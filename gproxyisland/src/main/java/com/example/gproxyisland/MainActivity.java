@@ -303,6 +303,8 @@ public class MainActivity extends Activity {
                 String err = null;
                 try {
                     r = c.quotaProbe(cr.id);
+                    // 余额类（如 DeepSeek）gproxy 不存历史，只能靠本机记住上次查询结果
+                    if (r.raw != null) Cfg.saveProbe(this, cr.id, r.raw);
                 } catch (Exception e) {
                     err = msg(e);
                 }
