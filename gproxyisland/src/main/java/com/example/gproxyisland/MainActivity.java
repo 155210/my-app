@@ -74,14 +74,7 @@ public class MainActivity extends Activity {
         drag = check(box, "解锁位置，允许拖动悬浮岛（不勾 = 锁定在顶部居中）", Cfg.draggable(this));
         proxyCheck = check(box, "检测代理（NekoBox）有没有开，没开岛变红并震动提醒", Cfg.proxyCheck(this));
         Button nl = button(box, "给通知使用权（只读 NekoBox 通知标题 = 节点名）", false);
-        nl.setOnClickListener(v -> {
-            try {
-                startActivity(new Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS"));
-            } catch (Exception e) {
-                startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                        Uri.parse("package:" + getPackageName())));
-            }
-        });
+        nl.setOnClickListener(v -> openListenerSettings());
         clashApi = field(box, "NekoBox Clash API 地址（看当前节点用；要在 NekoBox 设置里打开「启用 Clash API」，留空不读节点）",
                 Cfg.clashApi(this), InputType.TYPE_TEXT_VARIATION_URI);
         clashSecret = field(box, "Clash API 密钥（一般留空）", Cfg.clashSecret(this),
@@ -465,6 +458,27 @@ public class MainActivity extends Activity {
                 + "\n悬浮岛：" + (IslandService.running ? "运行中" : "未开启")
                 + "\n通知使用权（读节点名）：" + (listenerOn() ? "已给" : "未给"));
         toggle.setText(IslandService.running ? "关闭悬浮岛" : "开启悬浮岛");
+    }
+
+    /** 先直接跳到本 App 的通知使用权开关，不行再跳列表，再不行跳应用详情 */
+    private void openListenerSettings() {
+        Intent[] tries = {
+                Build.VERSION.SDK_INT >= 30
+                        ? new Intent("android.settings.NOTIFICATION_LISTENER_DETAIL_SETTINGS")
+                        .putExtra("android.provider.extra.NOTIFICATION_LISTENER_COMPONENT_NAME",
+                                new android.content.ComponentName(this, NodeListener.class).flattenToString())
+                        : null,
+                new Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS"),
+                new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + getPackageName())),
+        };
+        for (Intent i : tries) {
+            if (i == null) continue;
+            try {
+                startActivity(i);
+                return;
+            } catch (Exception ignored) {
+            }
+        }
     }
 
     private boolean listenerOn() {
