@@ -42,11 +42,11 @@ import java.util.List;
  * 前台服务：在屏幕顶部画一颗黑色胶囊（悬浮窗），读 gproxy 用量。
  *
  * 收起时按优先级显示：
- *   刚完成/刚失败的提示（6 秒，绿灯/红灯）＞ 生成中（黄灯闪烁 + 计时）＞ 今日花费。
+ *   生成中（黄灯闪烁 + 计时）＞ 刚完成/刚失败的提示（15 秒，绿灯/红灯）＞ 今日花费。
  * 状态点：绿 = 正常；黄 = 到预算提醒线；红 = 超预算或最近一次失败；灰 = 连不上 gproxy。
  *
  * 刷新：空闲按设置的间隔；有请求在跑或刚跑完的 20 秒内每 2 秒一次。熄屏暂停。
- * 「生成中」读 gproxy 上游日志里 state = in_progress 的行，需要在 gproxy 控制台打开「上游日志」。
+ * 「生成中」读 gproxy 上游日志里 state = in_progress 的行，需要 gproxy 打开「上游日志」和「上游日志正文」。
  */
 public class IslandService extends Service {
     static final String ACTION_STOP = "com.example.gproxyisland.STOP";
@@ -54,7 +54,9 @@ public class IslandService extends Service {
     private static final int NID = 1;
 
     private static final int GREEN = 0xFF5DCAA5, AMBER = 0xFFEF9F27, RED = 0xFFE24B4A, GREY = 0xFF888780;
-    private static final long FAST_MS = 2000, ACTIVE_TAIL_MS = 20000, POP_MS = 6000;
+    private static final long FAST_MS = 2000, ACTIVE_TAIL_MS = 20000, POP_MS = 15000;
+    /** 多久读一次 gproxy 日志开关、额度历史 */
+    private static final long FLAGS_MS = 60000, QUOTA_MS = 60000;
     /** 预算提醒线 */
     private static final double WARN_RATIO = 0.8;
 
@@ -72,11 +74,15 @@ public class IslandService extends Service {
     private GproxyClient client;
 
     // ── 只在 io 线程用 ──
-    private String ioLastId;
-    private long ioSummaryAt, ioActiveUntil;
+    /** 上次列表里的 id；null = 还没拉过 */
+    private java.util.Set<String> ioSeen;
+    private long ioSummaryAt, ioActiveUntil, ioFlagsAt, ioQuotaAt;
+    private GproxyClient.LogFlags ioFlags;
+    private final Diag ioDiag = new Diag();
+    private volatile boolean wantQuota;
 
     // ── 只在 ui 线程用 ──
-    private boolean expanded;
+    private volatile boolean expanded;
     private volatile boolean screenOn = true;
     private GproxyClient.Summary summary;
     private List<GproxyClient.Record> records = new ArrayList<>();
@@ -84,6 +90,32 @@ public class IslandService extends Service {
     private GproxyClient.Record popRecord;
     private String error;
     private long updatedAt;
+    private GproxyClient.LogFlags flags;
+    private Diag diag = new Diag();
+    private List<String> quotaLines = new ArrayList<>();
+    private String enableMsg;
+
+    /** 调试信息：展开岛最下面显示，方便截图定位 */
+    static class Diag {
+        long polls, lastPollAt, lastOkAt, newestAt;
+        String newestId = "", newestState, inflightErr, lastErr;
+        int inflight, records;
+
+        Diag copy() {
+            Diag d = new Diag();
+            d.polls = polls;
+            d.lastPollAt = lastPollAt;
+            d.lastOkAt = lastOkAt;
+            d.newestAt = newestAt;
+            d.newestId = newestId;
+            d.newestState = newestState;
+            d.inflightErr = inflightErr;
+            d.lastErr = lastErr;
+            d.inflight = inflight;
+            d.records = records;
+            return d;
+        }
+    }
 
     static boolean running;
 
@@ -307,6 +339,7 @@ public class IslandService extends Service {
                             popRecord = null;
                             render();
                             if (expanded) {
+                                wantQuota = true;
                                 io.removeCallbacks(poll);
                                 io.post(poll);
                             }
@@ -358,6 +391,14 @@ public class IslandService extends Service {
         if (summary == null) {
             dotBg.setColor(error != null && !error.startsWith("连不上") ? RED : GREY);
             head.setText(error != null ? error : "gproxy 连接中…");
+        } else if (!flights.isEmpty() && !expanded) {
+            GproxyClient.Flight f = flights.get(0);
+            dotBg.setColor(AMBER);
+            pulsing = true;
+            // 上游日志进行中时 firstResponseAtMs 不会实时写回，所以不区分「等待/生成」
+            head.setText("生成中 · " + Cfg.model(f.model)
+                    + " · " + Cfg.secs(now - f.startedAt)
+                    + (flights.size() > 1 ? " +" + (flights.size() - 1) : ""));
         } else if (popRecord != null && !expanded) {
             GproxyClient.Record r = popRecord;
             dotBg.setColor(r.failed() ? RED : GREEN);
@@ -369,13 +410,6 @@ public class IslandService extends Service {
                         + (d.isEmpty() ? "" : " · " + d)
                         + (r.cost >= 0 ? " · " + Cfg.money(r.cost) : ""));
             }
-        } else if (!flights.isEmpty() && !expanded) {
-            GproxyClient.Flight f = flights.get(0);
-            dotBg.setColor(AMBER);
-            pulsing = true;
-            head.setText((f.responding ? "生成中 · " : "等待中 · ") + Cfg.model(f.model)
-                    + " · " + Cfg.secs(now - f.startedAt)
-                    + (flights.size() > 1 ? " +" + (flights.size() - 1) : ""));
         } else {
             dotBg.setColor(baseColor());
             head.setText(expanded
@@ -429,7 +463,7 @@ public class IslandService extends Service {
                 TextView t = text(12, AMBER, false);
                 t.setMaxWidth(max);
                 t.setPadding(0, dp(5), 0, 0);
-                t.setText("▶ " + (f.responding ? "生成中 " : "等待中 ") + Cfg.model(f.model)
+                t.setText("▶ 生成中 " + Cfg.model(f.model)
                         + " · " + Cfg.secs(now - f.startedAt));
                 detail.addView(t);
                 pulsing = true;
@@ -452,6 +486,32 @@ public class IslandService extends Service {
                 t.setText("今天还没有请求");
                 detail.addView(t);
             }
+            if (flags != null && !flags.live()) {
+                TextView t = text(12, AMBER, false);
+                t.setMaxWidth(max);
+                t.setSingleLine(false);
+                t.setPadding(0, dp(6), 0, 0);
+                t.setText(enableMsg != null ? enableMsg
+                        : "「生成中」不可用：gproxy 没开" + (flags.upstream ? "「上游日志正文」" : "「上游日志」和「上游日志正文」")
+                        + "。点这行一键打开");
+                t.setOnClickListener(v -> enableLog());
+                detail.addView(t);
+            }
+            for (String q : quotaLines) {
+                TextView t = text(12, 0xFFB4B2A9, false);
+                t.setMaxWidth(max);
+                t.setPadding(0, dp(5), 0, 0);
+                t.setText(q);
+                detail.addView(t);
+            }
+            if (Cfg.debug(this)) {
+                TextView t = text(10, GREY, false);
+                t.setMaxWidth(max);
+                t.setSingleLine(false);
+                t.setPadding(0, dp(6), 0, 0);
+                t.setText(debugText(now));
+                detail.addView(t);
+            }
         }
         detail.setVisibility(expanded ? View.VISIBLE : View.GONE);
         bg.setCornerRadius(expanded ? dp(20) : dp(18));
@@ -459,6 +519,54 @@ public class IslandService extends Service {
         // 有请求在跑时每秒刷新计时
         ui.removeCallbacks(tick);
         if (!flights.isEmpty()) ui.postDelayed(tick, 1000);
+    }
+
+    private String debugText(long now) {
+        Diag d = diag;
+        StringBuilder b = new StringBuilder("调试 · 第 ").append(d.polls).append(" 次刷新");
+        if (d.lastPollAt > 0) b.append(" · ").append((now - d.lastPollAt) / 1000).append("s 前");
+        b.append(" · 间隔 ").append(Cfg.interval(this)).append("s");
+        b.append("\n上次成功 ").append(d.lastOkAt > 0 ? Cfg.hms(d.lastOkAt) : "无")
+                .append(" · 记录 ").append(d.records).append(" 条");
+        if (!d.newestId.isEmpty()) {
+            b.append("\n最新 ").append(d.newestId.length() > 10 ? d.newestId.substring(0, 10) : d.newestId)
+                    .append(" · ").append(Cfg.hms(d.newestAt))
+                    .append(d.newestState != null ? " · " + d.newestState : "");
+        }
+        b.append("\n进行中 ").append(d.inflight).append(" 条 · 上游日志 ")
+                .append(flags == null ? "?" : flags.upstream ? "开" : "关")
+                .append(" · 正文 ").append(flags == null ? "?" : flags.upstreamBody ? "开" : "关");
+        if (d.inflightErr != null) b.append("\n读上游日志出错：").append(d.inflightErr);
+        if (d.lastErr != null) b.append("\n最近错误：").append(d.lastErr);
+        return b.toString();
+    }
+
+    /** 一键打开 gproxy 上游日志 + 正文 */
+    private void enableLog() {
+        enableMsg = "正在打开上游日志…";
+        render();
+        io.post(() -> {
+            String msg;
+            GproxyClient.LogFlags f = null;
+            try {
+                f = client.enableLiveLog();
+                msg = f.live() ? null : "打开失败：gproxy 设置没变";
+            } catch (Exception e) {
+                msg = "打开失败：" + (e.getMessage() == null ? e.toString() : e.getMessage());
+            }
+            if (f != null) {
+                ioFlags = f;
+                ioFlagsAt = System.currentTimeMillis();
+            }
+            final String m = msg;
+            final GproxyClient.LogFlags ff = f;
+            ui.post(() -> {
+                enableMsg = m;
+                if (ff != null) flags = ff;
+                if (ff != null && ff.live()) Toast.makeText(this, "已打开，下次请求就能看到「生成中」", Toast.LENGTH_LONG).show();
+                render();
+            });
+        });
     }
 
     private final Runnable tick = this::render;
@@ -518,39 +626,79 @@ public class IslandService extends Service {
         List<GproxyClient.Record> rs = null;
         List<GproxyClient.Flight> fl = null;
         GproxyClient.Record fresh = null;
+        List<String> ql = null;
         String err = null;
+        ioDiag.polls++;
+        ioDiag.lastPollAt = now;
         try {
-            rs = client.recent(Math.max(3, Cfg.recent(this)));
-            String newest = rs.isEmpty() ? "" : rs.get(0).id;
-            boolean changed = ioLastId != null && !newest.isEmpty() && !newest.equals(ioLastId);
-            if (changed) {
-                fresh = rs.get(0);
-                ioActiveUntil = now + ACTIVE_TAIL_MS;
+            rs = client.recent(Math.max(5, Cfg.recent(this)));
+            // 列表按开始时间排，长请求完成时不一定在第一条：出现了上次没见过的 id 就算有新完成
+            java.util.Set<String> ids = new java.util.HashSet<>();
+            for (GproxyClient.Record r : rs) ids.add(r.id);
+            if (ioSeen != null) {
+                for (GproxyClient.Record r : rs) {
+                    if (!r.id.isEmpty() && !ioSeen.contains(r.id)) {
+                        fresh = r;
+                        break;
+                    }
+                }
             }
-            boolean first = ioLastId == null;
-            ioLastId = newest;
-            if (first || changed || now - ioSummaryAt >= Cfg.interval(this) * 1000L) {
+            boolean first = ioSeen == null;
+            ioSeen = ids;
+            if (fresh != null) ioActiveUntil = now + ACTIVE_TAIL_MS;
+            ioDiag.records = rs.size();
+            if (!rs.isEmpty()) {
+                GproxyClient.Record n = rs.get(0);
+                ioDiag.newestId = n.id;
+                ioDiag.newestAt = n.startedAt;
+                ioDiag.newestState = n.state;
+            }
+            if (first || fresh != null || now - ioSummaryAt >= Cfg.interval(this) * 1000L) {
                 s = client.today();
                 ioSummaryAt = now;
             }
+            if (ioFlags == null || now - ioFlagsAt >= FLAGS_MS) {
+                try {
+                    ioFlags = client.logFlags();
+                } catch (Exception ignored) {
+                    // 非管理员读不到设置，不影响别的
+                }
+                ioFlagsAt = now;
+            }
             try {
                 fl = client.inflight();
-            } catch (Exception ignored) {
+                ioDiag.inflightErr = null;
+            } catch (Exception e) {
                 fl = new ArrayList<>();
+                ioDiag.inflightErr = e.getMessage() == null ? e.toString() : e.getMessage();
             }
+            ioDiag.inflight = fl.size();
             if (!fl.isEmpty()) ioActiveUntil = now + ACTIVE_TAIL_MS;
+            if (wantQuota || (expanded && now - ioQuotaAt >= QUOTA_MS)) {
+                wantQuota = false;
+                ioQuotaAt = now;
+                ql = quotaSummary();
+            }
+            ioDiag.lastOkAt = now;
         } catch (java.net.ConnectException | java.net.SocketTimeoutException e) {
             err = "连不上 gproxy，没在运行？";
         } catch (Exception e) {
             err = e.getMessage() == null ? e.toString() : e.getMessage();
         }
+        if (err != null) ioDiag.lastErr = Cfg.hms(now) + " " + err;
         final GproxyClient.Summary fs = s;
         final List<GproxyClient.Record> frs = rs;
         final List<GproxyClient.Flight> ffl = fl;
         final GproxyClient.Record ffresh = fresh;
         final String ferr = err;
+        final GproxyClient.LogFlags fflags = ioFlags;
+        final Diag fdiag = ioDiag.copy();
+        final List<String> fql = ql;
         ui.post(() -> {
             error = ferr;
+            diag = fdiag;
+            if (fflags != null) flags = fflags;
+            if (fql != null) quotaLines = fql;
             if (ferr != null && ferr.startsWith("连不上")) {
                 summary = null;
                 flights = new ArrayList<>();
@@ -564,7 +712,7 @@ public class IslandService extends Service {
             if (ffl != null) flights = ffl;
             if (ffresh != null) {
                 if (ffresh.failed()) buzz(new long[]{0, 60, 80, 60});
-                if (Cfg.pop(this) && !expanded) {
+                if (Cfg.pop(this)) {
                     popRecord = ffresh;
                     ui.removeCallbacks(endPop);
                     ui.postDelayed(endPop, POP_MS);
@@ -573,6 +721,23 @@ public class IslandService extends Service {
             render();
         });
         return now < ioActiveUntil;
+    }
+
+    /** 展开岛里的额度摘要：只读 gproxy 存的历史，不请求上游 */
+    private List<String> quotaSummary() {
+        List<String> out = new ArrayList<>();
+        try {
+            for (GproxyClient.Cred c : client.credentials()) {
+                if (!c.enabled) continue;
+                GproxyClient.Quota q = Cfg.bestQuota(this, c.id, client.quotaHistory(c.id));
+                String line = Cfg.quotaLine(q);
+                if (line == null) continue;
+                out.add("额度 " + c.name + " · " + line);
+                if (out.size() >= 4) break;
+            }
+        } catch (Exception ignored) {
+        }
+        return out;
     }
 
     private final BroadcastReceiver screen = new BroadcastReceiver() {

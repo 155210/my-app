@@ -21,11 +21,16 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /** 设置页：填 gproxy 地址和账号，授权悬浮窗，开关悬浮岛 */
 public class MainActivity extends Activity {
     private EditText url, user, pass, interval, recent, budget;
-    private CheckBox pop, vibrate, drag;
-    private TextView status, testResult;
+    private CheckBox pop, vibrate, drag, debug;
+    private TextView status, testResult, logState;
+    private LinearLayout quotaBox;
+    private TextView quotaMsg;
     private Button toggle;
 
     private static final int FG = 0xFFF1EFE8, MUTED = 0xFFB4B2A9, ACCENT = 0xFF5DCAA5;
@@ -57,18 +62,24 @@ public class MainActivity extends Activity {
         float b0 = Cfg.budget(this);
         budget = field(box, "每日预算（美元，0 = 不提醒；用到 80% 变黄，超了变红）",
                 b0 > 0 ? trim(b0) : "0", InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
-        interval = field(box, "空闲时刷新间隔（秒，最少 5；有请求时自动每 2 秒）",
+        interval = field(box, "空闲时刷新间隔（秒，3~120，默认 5；有请求时自动每 2 秒）",
                 String.valueOf(Cfg.interval(this)), InputType.TYPE_CLASS_NUMBER);
         recent = field(box, "展开后显示最近几次（0~10）", String.valueOf(Cfg.recent(this)), InputType.TYPE_CLASS_NUMBER);
 
         pop = check(box, "请求完成/失败时胶囊短暂提示（绿灯/红灯）", Cfg.pop(this));
         vibrate = check(box, "预算提醒和请求失败时震动", Cfg.vibrate(this));
         drag = check(box, "解锁位置，允许拖动悬浮岛（不勾 = 锁定在顶部居中）", Cfg.draggable(this));
+        debug = check(box, "展开时显示调试信息（刷新次数、最新记录、上游日志开关、错误）", Cfg.debug(this));
 
-        TextView logTip = label("想看到「生成中」：在 gproxy 控制台的设置里打开「上游日志」（不用开日志正文）。"
-                + "没开的话只有完成后的绿灯/红灯提示。", 12, MUTED);
+        TextView logTip = label("想看到「生成中」：gproxy 要同时打开「上游日志」和「上游日志正文」。"
+                + "只开上游日志时，gproxy 要等请求结束才写记录，进行中看不到。"
+                + "正文会占一些存储（gproxy 默认保留 7 天、最多 2GB，可在 gproxy 设置里改）。", 12, MUTED);
         logTip.setPadding(0, dp(4), 0, dp(4));
         box.addView(logTip);
+        logState = label("", 13, MUTED);
+        box.addView(logState);
+        Button enableLog = button(box, "一键打开 gproxy 上游日志 + 正文", false);
+        enableLog.setOnClickListener(v -> enableLog());
 
         Button test = button(box, "测试连接", false);
         testResult = label("", 13, MUTED);
@@ -134,6 +145,22 @@ public class MainActivity extends Activity {
         app.setOnClickListener(v -> startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
                 Uri.parse("package:" + getPackageName()))));
 
+        TextView qt = label("上游额度", 17, FG);
+        qt.setTypeface(Typeface.DEFAULT_BOLD);
+        qt.setPadding(0, dp(24), 0, dp(4));
+        box.addView(qt);
+        TextView qs = label("打开页面只显示历史读数（gproxy 已存的 + 本机上次查询），不请求上游；"
+                + "点某个凭据的「查询」才会让 gproxy 去问上游。", 12, MUTED);
+        box.addView(qs);
+        Button qr = button(box, "刷新历史（不请求上游）", false);
+        qr.setOnClickListener(v -> loadQuota());
+        quotaMsg = label("", 13, MUTED);
+        quotaMsg.setPadding(0, dp(6), 0, 0);
+        box.addView(quotaMsg);
+        quotaBox = new LinearLayout(this);
+        quotaBox.setOrientation(LinearLayout.VERTICAL);
+        box.addView(quotaBox);
+
         TextView tip = label("小米手机建议：在系统设置里把本应用的「省电策略」设为「无限制」，否则锁屏久了可能被系统停掉。"
                 + "熄屏时悬浮岛会自动暂停刷新，不额外耗电。", 12, MUTED);
         tip.setPadding(0, dp(14), 0, 0);
@@ -145,6 +172,191 @@ public class MainActivity extends Activity {
                 && checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 1);
         }
+        if (!Cfg.pass(this).isEmpty()) {
+            loadQuota();
+            checkLog();
+        }
+    }
+
+    private GproxyClient client() {
+        return new GproxyClient(Cfg.url(this), Cfg.user(this), Cfg.pass(this));
+    }
+
+    private static String msg(Exception e) {
+        if (e instanceof java.net.ConnectException) return "连不上 gproxy";
+        return e.getMessage() == null ? e.toString() : e.getMessage();
+    }
+
+    private void showFlags(GproxyClient.LogFlags f) {
+        logState.setTextColor(f.live() ? ACCENT : 0xFFEF9F27);
+        logState.setText("gproxy 上游日志：" + (f.upstream ? "开" : "关") + " · 上游日志正文：" + (f.upstreamBody ? "开" : "关")
+                + (f.live() ? " ✓ 「生成中」可用" : " → 「生成中」不可用"));
+    }
+
+    private void checkLog() {
+        final GproxyClient c = client();
+        new Thread(() -> {
+            try {
+                GproxyClient.LogFlags f = c.logFlags();
+                runOnUiThread(() -> showFlags(f));
+            } catch (Exception e) {
+                runOnUiThread(() -> logState.setText("读不到 gproxy 设置：" + msg(e)));
+            }
+        }).start();
+    }
+
+    private void enableLog() {
+        save();
+        logState.setTextColor(MUTED);
+        logState.setText("正在打开…");
+        final GproxyClient c = client();
+        new Thread(() -> {
+            try {
+                GproxyClient.LogFlags f = c.enableLiveLog();
+                runOnUiThread(() -> showFlags(f));
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    logState.setTextColor(0xFFF09595);
+                    logState.setText("打开失败：" + msg(e) + "\n可以到 gproxy 控制台「设置 → 日志」手动打开。");
+                });
+            }
+        }).start();
+    }
+
+    // ───────────── 上游额度 ─────────────
+
+    private void loadQuota() {
+        quotaMsg.setTextColor(MUTED);
+        quotaMsg.setText("读取中…");
+        final GproxyClient c = client();
+        new Thread(() -> {
+            try {
+                List<GproxyClient.Cred> cs = c.credentials();
+                List<GproxyClient.Quota> qs = new ArrayList<>();
+                for (GproxyClient.Cred cr : cs) {
+                    GproxyClient.Quota h = null;
+                    try {
+                        h = c.quotaHistory(cr.id);
+                    } catch (Exception ignored) {
+                    }
+                    qs.add(Cfg.bestQuota(this, cr.id, h));
+                }
+                runOnUiThread(() -> {
+                    quotaBox.removeAllViews();
+                    quotaMsg.setText(cs.isEmpty() ? "gproxy 里没有凭据" : "共 " + cs.size() + " 个凭据");
+                    for (int i = 0; i < cs.size(); i++) quotaCard(cs.get(i), qs.get(i));
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    quotaMsg.setTextColor(0xFFF09595);
+                    quotaMsg.setText("读取失败：" + msg(e));
+                });
+            }
+        }).start();
+    }
+
+    private void quotaCard(GproxyClient.Cred cr, GproxyClient.Quota q) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(12), dp(10), dp(12), dp(10));
+        GradientDrawable g = new GradientDrawable();
+        g.setColor(0xFF1E2025);
+        g.setCornerRadius(dp(12));
+        card.setBackground(g);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = dp(10);
+        quotaBox.addView(card, lp);
+
+        LinearLayout top = new LinearLayout(this);
+        top.setOrientation(LinearLayout.HORIZONTAL);
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        TextView name = label(cr.name + (!cr.enabled ? "（已停用）" : "dead".equals(cr.status) ? "（失效）" : ""), 14, FG);
+        name.setTypeface(Typeface.DEFAULT_BOLD);
+        top.addView(name, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        Button probe = new Button(this);
+        probe.setText("查询");
+        probe.setAllCaps(false);
+        probe.setTextColor(Color.BLACK);
+        GradientDrawable pg = new GradientDrawable();
+        pg.setColor(ACCENT);
+        pg.setCornerRadius(dp(10));
+        probe.setBackground(pg);
+        probe.setStateListAnimator(null);
+        probe.setMinWidth(0);
+        probe.setMinimumWidth(0);
+        probe.setPadding(dp(14), 0, dp(14), 0);
+        top.addView(probe, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(34)));
+        card.addView(top);
+
+        LinearLayout body = new LinearLayout(this);
+        body.setOrientation(LinearLayout.VERTICAL);
+        card.addView(body);
+        fillQuota(body, q, null);
+
+        probe.setOnClickListener(v -> {
+            probe.setEnabled(false);
+            probe.setText("查询中…");
+            final GproxyClient c = client();
+            new Thread(() -> {
+                GproxyClient.Quota r = null;
+                String err = null;
+                try {
+                    r = c.quotaProbe(cr.id);
+                } catch (Exception e) {
+                    err = msg(e);
+                }
+                GproxyClient.Quota h = null;
+                try {
+                    h = c.quotaHistory(cr.id);
+                } catch (Exception ignored) {
+                }
+                final GproxyClient.Quota fr = r, fh = h;
+                final String fe = err;
+                runOnUiThread(() -> {
+                    probe.setEnabled(true);
+                    probe.setText("查询");
+                    GproxyClient.Quota show = fr != null ? fr : Cfg.bestQuota(this, cr.id, fh);
+                    if (fr != null && fh != null) fr.blockedUntil = fh.blockedUntil;
+                    fillQuota(body, show, fe);
+                });
+            }).start();
+        });
+    }
+
+    private void fillQuota(LinearLayout body, GproxyClient.Quota q, String err) {
+        body.removeAllViews();
+        if (err != null) {
+            TextView t = label("查询失败：" + err, 12, 0xFFF09595);
+            t.setPadding(0, dp(4), 0, 0);
+            body.addView(t);
+        }
+        if (q == null || q.rows.isEmpty()) {
+            TextView t = label(q != null && q.at > 0 ? "上游没返回额度读数（" + Cfg.when(q.at) + " 查询）"
+                    : "还没有查询记录，点「查询」看看", 12, MUTED);
+            t.setPadding(0, dp(4), 0, 0);
+            body.addView(t);
+            return;
+        }
+        for (GproxyClient.QuotaRow r : q.rows) {
+            String v = Cfg.quotaValue(r);
+            StringBuilder b = new StringBuilder(r.name).append("：").append(v == null ? "—" : v);
+            if (r.percent >= 0 && r.used != null && r.limit != null) b.append("（").append(r.used).append("/").append(r.limit).append("）");
+            if (r.percent >= 0 && r.remaining != null) b.append(" · 剩 ").append(r.remaining);
+            if (r.resetAt > 0) b.append(" · ").append(Cfg.until(r.resetAt)).append("（").append(Cfg.when(r.resetAt)).append("）");
+            int color = r.percent >= 90 ? 0xFFF09595 : r.percent >= 70 ? 0xFFEF9F27 : FG;
+            TextView t = label(b.toString(), 13, color);
+            t.setPadding(0, dp(4), 0, 0);
+            body.addView(t);
+        }
+        if (q.blockedUntil > System.currentTimeMillis()) {
+            TextView t = label("被上游限流，到 " + Cfg.when(q.blockedUntil) + " 前不会选用", 12, 0xFFF09595);
+            t.setPadding(0, dp(4), 0, 0);
+            body.addView(t);
+        }
+        TextView at = label(q.at > 0 ? "上次查询：" + Cfg.when(q.at) : "上次查询：无", 11, MUTED);
+        at.setPadding(0, dp(4), 0, 0);
+        body.addView(at);
     }
 
     @Override
@@ -167,17 +379,18 @@ public class MainActivity extends Activity {
     }
 
     private void save() {
-        int iv = parse(interval.getText().toString(), 30);
+        int iv = parse(interval.getText().toString(), 5);
         int rc = parse(recent.getText().toString(), 3);
         Cfg.sp(this).edit()
                 .putString("url", url.getText().toString().trim())
                 .putString("user", user.getText().toString().trim())
                 .putString("pass", pass.getText().toString())
-                .putInt("interval", Math.max(10, iv))
+                .putInt("interval2", Math.max(3, Math.min(120, iv)))
                 .putInt("recent", Math.max(0, Math.min(10, rc)))
                 .putBoolean("pop", pop.isChecked())
                 .putBoolean("vibrate", vibrate.isChecked())
                 .putBoolean("drag", drag.isChecked())
+                .putBoolean("debug", debug.isChecked())
                 .putFloat("budget", Math.max(0f, parseF(budget.getText().toString())))
                 .apply();
     }
@@ -196,9 +409,18 @@ public class MainActivity extends Activity {
                         + " · 入 " + Cfg.w(s.input) + " · 出 " + Cfg.w(s.output);
                 ok = true;
                 try {
+                    GproxyClient.LogFlags f = c.logFlags();
+                    msg += f.live() ? "\n上游日志 + 正文已开，「生成中」可用"
+                            : "\n「生成中」不可用：gproxy 没开" + (f.upstream ? "「上游日志正文」" : "「上游日志」和「上游日志正文」")
+                            + "，点上面的「一键打开」";
+                    runOnUiThread(() -> showFlags(f));
+                } catch (Exception e) {
+                    msg += "\n读不到 gproxy 日志设置：" + e.getMessage();
+                }
+                try {
                     c.inflight();
                 } catch (Exception e) {
-                    msg += "\n读不到上游日志，「生成中」不可用：" + e.getMessage();
+                    msg += "\n读不到上游日志：" + e.getMessage();
                 }
             } catch (java.net.ConnectException e) {
                 msg = "连不上：gproxy 没在运行，或地址/端口不对";

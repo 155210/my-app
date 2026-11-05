@@ -30,9 +30,85 @@ final class Cfg {
         return sp(c).getString("pass", "");
     }
 
-    /** 空闲时的刷新间隔（秒），最少 5；有请求在跑时自动加快到 2 秒 */
+    /**
+     * 空闲时的刷新间隔（秒），3~120，默认 5；有请求在跑时自动加快到 2 秒。
+     * 旧版存的 key「interval」默认 30、最少 10，太慢，绿灯常常错过，所以换了新 key。
+     */
     static int interval(Context c) {
-        return Math.max(5, sp(c).getInt("interval", 15));
+        return Math.max(3, Math.min(120, sp(c).getInt("interval2", 5)));
+    }
+
+    /** 展开岛最下面显示调试信息 */
+    static boolean debug(Context c) {
+        return sp(c).getBoolean("debug", true);
+    }
+
+    // ── 上游额度：本机记下每个凭据最后一次「查询」的原始返回 ──
+
+    static void saveProbe(Context c, String credId, String json) {
+        sp(c).edit().putString("probe:" + credId, json).apply();
+    }
+
+    static GproxyClient.Quota probe(Context c, String credId) {
+        String s = sp(c).getString("probe:" + credId, null);
+        if (s == null) return null;
+        try {
+            return GproxyClient.parseSnapshot(new org.json.JSONObject(s));
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** gproxy 存的历史和本机上次查询结果，取更新的那个 */
+    static GproxyClient.Quota bestQuota(Context c, String credId, GproxyClient.Quota history) {
+        GproxyClient.Quota local = probe(c, credId);
+        if (local == null) return history;
+        if (history == null || local.at >= history.at) {
+            if (history != null) local.blockedUntil = Math.max(local.blockedUntil, history.blockedUntil);
+            return local;
+        }
+        return history;
+    }
+
+    /** 一行摘要：5小时 42% · 7天 18% · 14:30 查询；没有读数返回 null */
+    static String quotaLine(GproxyClient.Quota q) {
+        if (q == null || q.rows.isEmpty()) return null;
+        StringBuilder b = new StringBuilder();
+        int n = 0;
+        for (GproxyClient.QuotaRow r : q.rows) {
+            String v = quotaValue(r);
+            if (v == null) continue;
+            if (n++ > 0) b.append(" · ");
+            b.append(r.name).append(" ").append(v);
+            if (n >= 3) break;
+        }
+        if (n == 0) return q.at > 0 ? "无读数 · " + when(q.at) + " 查询" : "还没查询过";
+        if (q.blockedUntil > System.currentTimeMillis()) b.append(" · 限流到 ").append(hm(q.blockedUntil));
+        if (q.at > 0) b.append(" · ").append(when(q.at)).append(" 查询");
+        return b.toString();
+    }
+
+    static String quotaValue(GproxyClient.QuotaRow r) {
+        if (r.percent >= 0) return Math.round(r.percent) + "%";
+        if (r.used != null && r.limit != null) return r.used + "/" + r.limit;
+        if (r.remaining != null) return "剩 " + r.remaining + (r.unit != null ? " " + r.unit : "");
+        return null;
+    }
+
+    /** 今天的显示 HH:mm，否则 MM-dd HH:mm */
+    static String when(long ms) {
+        boolean today = new SimpleDateFormat("yyyyMMdd", Locale.US).format(new Date(ms))
+                .equals(new SimpleDateFormat("yyyyMMdd", Locale.US).format(new Date()));
+        return new SimpleDateFormat(today ? "HH:mm" : "MM-dd HH:mm", Locale.US).format(new Date(ms));
+    }
+
+    /** 重置倒计时：3小时12分后 */
+    static String until(long ms) {
+        long m = (ms - System.currentTimeMillis()) / 60000;
+        if (m <= 0) return "已到重置时间";
+        if (m < 60) return m + "分后重置";
+        if (m < 48 * 60) return (m / 60) + "小时" + (m % 60) + "分后重置";
+        return (m / 1440) + "天后重置";
     }
 
     /** 展开后显示最近几次，0~10 */
@@ -80,6 +156,10 @@ final class Cfg {
 
     static String money(double v) {
         return String.format(Locale.US, "$%.2f", v);
+    }
+
+    static String hms(long ms) {
+        return new SimpleDateFormat("HH:mm:ss", Locale.US).format(new Date(ms));
     }
 
     static String hm(long ms) {
