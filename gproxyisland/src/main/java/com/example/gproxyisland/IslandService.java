@@ -93,6 +93,9 @@ public class IslandService extends Service {
     private GproxyClient.LogFlags flags;
     private Diag diag = new Diag();
     private List<String> quotaLines = new ArrayList<>();
+    /** 岛上「查询额度」的状态，null = 空闲 */
+    private String probeMsg;
+    private boolean probing;
     private String enableMsg;
 
     /** 调试信息：展开岛最下面显示，方便截图定位 */
@@ -498,11 +501,20 @@ public class IslandService extends Service {
                 detail.addView(t);
             }
             for (String q : quotaLines) {
-                TextView t = text(12, 0xFFB4B2A9, false);
+                TextView t = text(12, q.contains("⚠") ? AMBER : 0xFFB4B2A9, false);
                 t.setMaxWidth(max);
                 t.setSingleLine(false);
                 t.setPadding(0, dp(5), 0, 0);
                 t.setText(q);
+                detail.addView(t);
+            }
+            {
+                TextView t = text(12, probing ? GREY : GREEN, true);
+                t.setMaxWidth(max);
+                t.setSingleLine(false);
+                t.setPadding(0, dp(6), 0, dp(2));
+                t.setText(probing ? "额度查询中…" : "⟳ 查询额度（会请求上游）" + (probeMsg != null ? " · " + probeMsg : ""));
+                if (!probing) t.setOnClickListener(v -> probeAll());
                 detail.addView(t);
             }
             if (Cfg.debug(this)) {
@@ -722,6 +734,43 @@ public class IslandService extends Service {
             render();
         });
         return now < ioActiveUntil;
+    }
+
+    /** 岛上点「查询额度」：每个启用的凭据都让 gproxy 去问一次上游，结果存本机 */
+    private void probeAll() {
+        probing = true;
+        probeMsg = null;
+        render();
+        io.post(() -> {
+            int ok = 0, fail = 0;
+            String lastErr = null;
+            try {
+                for (GproxyClient.Cred c : client.credentials()) {
+                    if (!c.enabled) continue;
+                    try {
+                        GproxyClient.Quota q = client.quotaProbe(c.id);
+                        if (q.raw != null) Cfg.saveProbe(this, c.id, q.raw);
+                        ok++;
+                    } catch (Exception e) {
+                        fail++;
+                        lastErr = e.getMessage();
+                    }
+                }
+            } catch (Exception e) {
+                fail++;
+                lastErr = e.getMessage();
+            }
+            List<String> ql = quotaSummary();
+            ioQuotaAt = System.currentTimeMillis();
+            final String m = Cfg.hm(System.currentTimeMillis()) + " 已查 " + ok + " 个"
+                    + (fail > 0 ? "，失败 " + fail + " 个" + (lastErr != null ? "：" + lastErr : "") : "");
+            ui.post(() -> {
+                probing = false;
+                probeMsg = m;
+                quotaLines = ql;
+                render();
+            });
+        });
     }
 
     /** 展开岛里的额度摘要：只读 gproxy 存的历史，不请求上游 */

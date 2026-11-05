@@ -185,6 +185,8 @@ class GproxyClient {
         String used, limit, remaining, unit;
         /** 重置/结束时间，未知 = 0 */
         long resetAt;
+        /** 窗口开始时间，未知 = 0（算「按此速度何时用完」用） */
+        long startAt;
     }
 
     static class Quota {
@@ -250,6 +252,7 @@ class GproxyClient {
                 QuotaRow r = new QuotaRow();
                 r.name = windowName(w);
                 if (!c.isNull("endsAtMs")) r.resetAt = c.optLong("endsAtMs");
+                r.startAt = c.optLong("startsAtMs");
                 JSONObject s = c.optJSONObject("sample");
                 if (s != null) {
                     r.percent = num(str(s, "usedPercent"));
@@ -295,6 +298,7 @@ class GproxyClient {
                 if (r.remaining == null) r.remaining = str(a, "remaining");
                 r.unit = str(a, "unit");
                 if (!a.isNull("periodEndMs")) r.resetAt = a.optLong("periodEndMs");
+                if (!a.isNull("periodStartMs")) r.startAt = a.optLong("periodStartMs");
             } else if (b != null) {
                 r.name = label != null ? label : "余额";
                 r.remaining = str(b, "remaining");

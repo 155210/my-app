@@ -350,6 +350,11 @@ public class MainActivity extends Activity {
             TextView t = label(b.toString(), 13, color);
             t.setPadding(0, dp(4), 0, 0);
             body.addView(t);
+            long ex = Cfg.exhaustAt(r, q.at);
+            if (ex > 0) {
+                TextView w = label("　按此速度 " + Cfg.day(ex) + " 用完，早于重置（" + Cfg.day(r.resetAt) + "）", 12, 0xFFEF9F27);
+                body.addView(w);
+            }
         }
         if (q.blockedUntil > System.currentTimeMillis()) {
             TextView t = label("被上游限流，到 " + Cfg.when(q.blockedUntil) + " 前不会选用", 12, 0xFFF09595);
