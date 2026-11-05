@@ -316,11 +316,12 @@ class GproxyClient {
         if (id == null || id.isEmpty()) return "额度";
         String s = id.toLowerCase();
         if (s.contains("five_hour") || s.equals("5h")) return "5小时";
-        if (s.contains("seven_day") || s.equals("7d") || s.contains("week")) {
-            if (s.contains("opus")) return "7天 Opus";
-            if (s.contains("sonnet")) return "7天 Sonnet";
-            return "7天";
+        if (s.startsWith("seven_day_")) {
+            // 按模型单独算的 7 天额度：seven_day_fable → 7天 Fable
+            String f = id.substring("seven_day_".length()).replace('_', ' ');
+            return f.isEmpty() ? "7天" : "7天 " + Character.toUpperCase(f.charAt(0)) + f.substring(1);
         }
+        if (s.equals("seven_day") || s.equals("7d") || s.contains("week")) return "7天";
         if (s.contains("day") || s.equals("1d")) return "每天";
         if (s.contains("month")) return "每月";
         return id;
