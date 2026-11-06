@@ -403,7 +403,14 @@ public class IslandService extends Service {
         head.setMaxWidth(max);
         boolean pulsing = false;
 
-        if (summary == null) {
+        boolean proxyBad = proxy != null && !proxy.ok();
+        if (proxyBad && !expanded) {
+            // 代理没开 / 不是指定节点：最高优先级，盖过连不上、生成中、完成提示
+            dotBg.setColor(RED);
+            head.setText(proxy.on()
+                    ? "⚠ 代理错误 · 不是指定节点" + (proxy.node != null ? " · " + proxy.node : "")
+                    : "⚠ 代理没开（NekoBox 没启动？）");
+        } else if (summary == null) {
             dotBg.setColor(error != null && !error.startsWith("连不上") ? RED : GREY);
             head.setText(error != null ? error : "gproxy 连接中…");
         } else if (!flights.isEmpty() && !expanded) {
@@ -426,7 +433,6 @@ public class IslandService extends Service {
                         + (r.cost >= 0 ? " · " + Cfg.money(r.cost) : ""));
             }
         } else {
-            boolean proxyBad = proxy != null && !proxy.ok();
             dotBg.setColor(proxyBad ? RED : baseColor());
             head.setText(expanded
                     ? "今日 " + summary.requests + " 次 · " + costText()
