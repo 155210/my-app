@@ -186,6 +186,11 @@ final class Cfg {
         return Math.max(0f, sp(c).getFloat("budget", 0f));
     }
 
+    /** 岛的大小（百分比，60~140，默认 100） */
+    static int scale(Context c) {
+        return Math.max(60, Math.min(140, sp(c).getInt("scale", 100)));
+    }
+
     /** 允许拖动；默认锁定在顶部居中 */
     static boolean draggable(Context c) {
         return sp(c).getBoolean("drag", false);

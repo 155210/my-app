@@ -78,7 +78,33 @@ public class MainActivity extends Activity {
 
         pop = check(box, "请求完成/失败时胶囊短暂提示（绿灯/红灯）", Cfg.pop(this));
         vibrate = check(box, "预算提醒和请求失败时震动", Cfg.vibrate(this));
-        drag = check(box, "解锁位置，允许拖动悬浮岛（不勾 = 锁定在顶部居中）", Cfg.draggable(this));
+        drag = check(box, "解锁位置，允许拖动悬浮岛（拖好后取消勾选保存 = 锁在那里；「位置复原」回顶部居中）", Cfg.draggable(this));
+        TextView scaleLabel = label("悬浮岛大小：" + Cfg.scale(this) + "%（松手立即生效）", 13, MUTED);
+        scaleLabel.setPadding(0, dp(10), 0, dp(2));
+        box.addView(scaleLabel);
+        android.widget.SeekBar scale = new android.widget.SeekBar(this);
+        scale.setMax((140 - 60) / 5);
+        scale.setProgress((Cfg.scale(this) - 60) / 5);
+        scale.setOnSeekBarChangeListener(new android.widget.SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(android.widget.SeekBar s, int p, boolean user) {
+                scaleLabel.setText("悬浮岛大小：" + (60 + p * 5) + "%（松手立即生效）");
+            }
+
+            @Override
+            public void onStartTrackingTouch(android.widget.SeekBar s) {
+            }
+
+            @Override
+            public void onStopTrackingTouch(android.widget.SeekBar s) {
+                Cfg.sp(MainActivity.this).edit().putInt("scale", 60 + s.getProgress() * 5).apply();
+                if (IslandService.running) {
+                    IslandService.stop(MainActivity.this);
+                    toggle.postDelayed(() -> IslandService.start(MainActivity.this), 300);
+                }
+            }
+        });
+        box.addView(scale, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(36)));
         proxyCheck = check(box, "检测代理（NekoBox）有没有开，没开岛变红并震动提醒", Cfg.proxyCheck(this));
         Button nl = button(box, "给通知使用权（只读 NekoBox 通知标题 = 节点名）", false);
         nl.setOnClickListener(v -> openListenerSettings());
@@ -167,7 +193,7 @@ public class MainActivity extends Activity {
             testResult.setText("已保存");
         });
 
-        Button reset = button(box, "悬浮岛位置复原（解锁拖动后用）", false);
+        Button reset = button(box, "悬浮岛位置复原（回到顶部居中）", false);
         reset.setOnClickListener(v -> {
             Cfg.sp(this).edit().remove("x").remove("y").apply();
             if (IslandService.running) {
