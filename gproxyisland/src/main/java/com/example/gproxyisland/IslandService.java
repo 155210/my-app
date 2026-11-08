@@ -242,9 +242,17 @@ public class IslandService extends Service {
         return h + dp(2);
     }
 
+    /** 岛的缩放（设置页滑条） */
+    private float k = 1f;
+
+    /** 按岛大小缩放的 dp */
+    private int sdp(float v) {
+        return dp(v * k);
+    }
+
     private TextView text(float sp, int color, boolean bold) {
         TextView t = new TextView(this);
-        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp);
+        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp * k);
         t.setTextColor(color);
         t.setSingleLine(true);
         if (bold) t.setTypeface(Typeface.DEFAULT_BOLD);
@@ -253,13 +261,14 @@ public class IslandService extends Service {
 
     private void buildIsland() {
         wm = getSystemService(WindowManager.class);
+        k = Cfg.scale(this) / 100f;
 
         root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(14), dp(7), dp(14), dp(7));
+        root.setPadding(sdp(14), sdp(7), sdp(14), sdp(7));
         bg = new GradientDrawable();
         bg.setColor(Color.BLACK);
-        bg.setCornerRadius(dp(18));
+        bg.setCornerRadius(sdp(18));
         root.setBackground(bg);
         root.setLayoutTransition(new LayoutTransition());
 
@@ -271,8 +280,8 @@ public class IslandService extends Service {
         dotBg.setShape(GradientDrawable.OVAL);
         dotBg.setColor(GREY);
         dot.setBackground(dotBg);
-        LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(dp(7), dp(7));
-        dlp.rightMargin = dp(8);
+        LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(sdp(7), sdp(7));
+        dlp.rightMargin = sdp(8);
         row.addView(dot, dlp);
         head = text(13, Color.WHITE, true);
         head.setText("gproxy 连接中…");
@@ -282,7 +291,7 @@ public class IslandService extends Service {
         detail = new LinearLayout(this);
         detail.setOrientation(LinearLayout.VERTICAL);
         detail.setVisibility(View.GONE);
-        detail.setPadding(0, dp(6), 0, dp(2));
+        detail.setPadding(0, sdp(6), 0, sdp(2));
         root.addView(detail);
 
         blink = ObjectAnimator.ofFloat(dot, "alpha", 1f, 0.25f);
@@ -303,14 +312,9 @@ public class IslandService extends Service {
                 PixelFormat.TRANSLUCENT);
         lp.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
         final boolean draggable = Cfg.draggable(this);
-        if (draggable) {
-            lp.x = Cfg.sp(this).getInt("x", 0);
-            lp.y = Math.max(minY(), Cfg.sp(this).getInt("y", minY() + dp(4)));
-        } else {
-            // 锁定：顶部居中，紧贴状态栏下方
-            lp.x = 0;
-            lp.y = minY() + dp(4);
-        }
+        // 拖到哪就存哪；锁定后也停在存的位置，只有「位置复原」清掉后才回顶部居中
+        lp.x = Cfg.sp(this).getInt("x", 0);
+        lp.y = Math.max(minY(), Cfg.sp(this).getInt("y", minY() + dp(4)));
         if (Build.VERSION.SDK_INT >= 28) {
             lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
         }
@@ -565,7 +569,7 @@ public class IslandService extends Service {
             }
         }
         detail.setVisibility(expanded ? View.VISIBLE : View.GONE);
-        bg.setCornerRadius(expanded ? dp(20) : dp(18));
+        bg.setCornerRadius(expanded ? sdp(20) : sdp(18));
 
         // 有请求在跑时每秒刷新计时
         ui.removeCallbacks(tick);
