@@ -683,9 +683,9 @@ public class MainActivity extends Activity {
             }
             msg.setText("下载中…（通知栏看进度）");
             upd.setEnabled(false);
-            Updater.download(this, latest, m -> runOnUiThread(() -> {
+            Updater.download(this, latest, (m, end) -> runOnUiThread(() -> {
                 msg.setText(m);
-                upd.setEnabled(true);
+                if (end) upd.setEnabled(true);
             }));
             return;
         }
