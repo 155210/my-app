@@ -48,6 +48,9 @@ class GproxyClient {
 
     private final String base, user, pass;
     private String token;
+    /** 上次登录被拒（密码不对）的时间：60 秒内不再发登录请求，免得每次刷新都往 gproxy 审计日志里写一条 */
+    private long loginDeniedAt;
+    private static final long LOGIN_RETRY_MS = 60000;
 
     GproxyClient(String base, String user, String pass) {
         String b = base == null ? "" : base.trim();
@@ -376,6 +379,9 @@ class GproxyClient {
     }
 
     private void login() throws IOException {
+        if (loginDeniedAt > 0 && System.currentTimeMillis() - loginDeniedAt < LOGIN_RETRY_MS) {
+            throw new HttpError(401, "登录失败，检查用户名和密码");
+        }
         JSONObject body = new JSONObject();
         try {
             body.put("name", user);
@@ -386,9 +392,13 @@ class GproxyClient {
         try {
             r = request("POST", "/portal/api/login", body.toString(), 8000);
         } catch (HttpError e) {
-            if (e.code == 401 || e.code == 403) throw new HttpError(e.code, "登录失败，检查用户名和密码");
+            if (e.code == 401 || e.code == 403) {
+                loginDeniedAt = System.currentTimeMillis();
+                throw new HttpError(e.code, "登录失败，检查用户名和密码");
+            }
             throw e;
         }
+        loginDeniedAt = 0;
         String t = json(r).optString("token", "");
         if (t.isEmpty()) throw new IOException("登录返回里没有 token");
         token = t;

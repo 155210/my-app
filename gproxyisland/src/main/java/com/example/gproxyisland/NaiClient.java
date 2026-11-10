@@ -50,8 +50,10 @@ final class NaiClient {
             try {
                 String raw = get(u, key);
                 long now = System.currentTimeMillis();
+                // 先解析：返回的不是 JSON 时不覆盖上次的好数据
+                Quota q = parse(new JSONObject(raw), now);
                 Cfg.sp(c).edit().putString("nai.raw", raw).putLong("nai.at", now).apply();
-                return parse(new JSONObject(raw), now);
+                return q;
             } catch (IOException e) {
                 if (e.getMessage() != null && e.getMessage().contains("401")) throw e;
                 if (first == null) first = e;
