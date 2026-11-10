@@ -126,6 +126,8 @@ public class IslandService extends Service {
     }
 
     static boolean running;
+    /** 服务已销毁：还在路上的后台结果回到主线程后直接丢掉，不再画、不再排计时 */
+    private volatile boolean dead;
 
     static void start(Context c) {
         Intent i = new Intent(c, IslandService.class);
@@ -184,6 +186,7 @@ public class IslandService extends Service {
 
     @Override
     public void onDestroy() {
+        dead = true;
         running = false;
         try {
             unregisterReceiver(screen);
@@ -473,7 +476,7 @@ public class IslandService extends Service {
     }
 
     private void render() {
-        if (root == null) return;
+        if (root == null || dead) return;
         long now = System.currentTimeMillis();
         int max = getResources().getDisplayMetrics().widthPixels - dp(48);
         head.setMaxWidth(max);
@@ -509,7 +512,9 @@ public class IslandService extends Service {
                         + (r.cost >= 0 ? " · " + Cfg.money(r.cost) : ""));
             }
         } else {
-            dotBg.setColor(proxyBad ? RED : baseColor());
+            boolean busy = expanded && !flights.isEmpty() && !proxyBad;
+            dotBg.setColor(proxyBad ? RED : busy ? AMBER : baseColor());
+            pulsing = busy;
             head.setText(expanded
                     ? "今日 " + summary.requests + " 次 · " + costText()
                     : (proxyBad ? (proxy.on() ? "⚠ 代理错误 · " : "⚠ 代理没开 · ") : "")
@@ -565,7 +570,6 @@ public class IslandService extends Service {
                 t.setText("▶ 生成中 " + Cfg.model(f.model)
                         + " · " + Cfg.secs(now - f.startedAt));
                 detail.addView(t);
-                pulsing = true;
             }
             int show = Math.min(Cfg.recent(this), records.size());
             for (int i = 0; i < show; i++) {
@@ -689,6 +693,7 @@ public class IslandService extends Service {
             final String m = msg;
             final GproxyClient.LogFlags ff = f;
             ui.post(() -> {
+                if (dead) return;
                 enableMsg = m;
                 if (ff != null) flags = ff;
                 if (ff != null && ff.live()) Toast.makeText(this, "已打开，下次请求就能看到「生成中」", Toast.LENGTH_LONG).show();
@@ -743,6 +748,8 @@ public class IslandService extends Service {
             boolean active = fetch();
             if (!screenOn) return;
             long delay = active ? FAST_MS : Cfg.interval(IslandService.this) * 1000L;
+            // 刷新进行中被点开 / 亮屏会另外排进一次刷新，这里先清掉，保证始终只有一条刷新循环
+            io.removeCallbacks(this);
             io.postDelayed(this, delay);
         }
     };
@@ -823,7 +830,11 @@ public class IslandService extends Service {
         } catch (Exception e) {
             err = e.getMessage() == null ? e.toString() : e.getMessage();
         }
-        if (err != null) ioDiag.lastErr = Cfg.hms(now) + " " + err;
+        if (err != null) {
+            ioDiag.lastErr = Cfg.hms(now) + " " + err;
+            // 界面可能已清掉汇总，恢复后的第一次刷新就重读，不等满一个间隔
+            ioSummaryAt = 0;
+        }
         final GproxyClient.Summary fs = s;
         final List<GproxyClient.Record> frs = rs;
         final List<GproxyClient.Flight> ffl = fl;
@@ -835,6 +846,7 @@ public class IslandService extends Service {
         final ProxyCheck.State fproxy = ioProxy;
         final boolean fproxyAlert = proxyAlert;
         ui.post(() -> {
+            if (dead) return;
             error = ferr;
             diag = fdiag;
             if (fflags != null) flags = fflags;

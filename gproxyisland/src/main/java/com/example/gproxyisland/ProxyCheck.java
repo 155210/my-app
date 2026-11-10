@@ -73,7 +73,8 @@ final class ProxyCheck {
         } catch (Exception ignored) {
         }
         s.listening = NodeListener.connected;
-        s.notif = NodeListener.nekoShown;
+        // 监听断开后 nekoShown 是断开前的旧值，不能再信
+        s.notif = s.listening && NodeListener.nekoShown;
         if (s.listening && s.notif) s.node = NodeListener.nodeTitle;
         String api = Cfg.clashApi(c);
         if (!api.isEmpty()) {
@@ -89,7 +90,8 @@ final class ProxyCheck {
             }
         }
         if (s.on()) s.exit = exit(s.node);
-        if (s.on()) s.wrongNode = !Cfg.nodeAllowed(c, s.node, s.exit);
+        // 刚切节点时出口常常一两次查不到；这时只凭节点名判断会误报，等出口查到（或连续失败几次）再下结论
+        if (s.on()) s.wrongNode = !(s.exit == null && exitPending) && !Cfg.nodeAllowed(c, s.node, s.exit);
         if (s.node != null) {
             Cfg.saveLastNode(c, s.node);
             s.node = Cfg.nodeShown(c, s.node);
@@ -145,15 +147,21 @@ final class ProxyCheck {
     // 只在轮询线程用
     private static String exitText, exitNode;
     private static long exitAt;
+    /** 出口连续查询失败的次数；头 EXIT_QUICK_TRIES 次隔 5 秒就重试 */
+    private static int exitFails;
+    private static final int EXIT_QUICK_TRIES = 2;
+    /** 出口还没查到、正在快速重试中 */
+    private static boolean exitPending;
 
     /** 走代理访问 Cloudflare trace，拿出口国家和机房。节点变了立刻重查，否则 5 分钟一次，失败 1 分钟后再试 */
     private static String exit(String node) {
         long now = System.currentTimeMillis();
         boolean changed = node != null && !node.equals(exitNode);
-        long ttl = exitText == null ? 60_000 : 300_000;
+        long ttl = exitText == null ? (exitPending ? 5_000 : 60_000) : 300_000;
         if (!changed && now - exitAt < ttl) return exitText;
         exitAt = now;
         exitNode = node;
+        if (changed) exitFails = 0;
         try {
             String loc = null, colo = null;
             for (String line : get("https://www.cloudflare.com/cdn-cgi/trace", null).split("\n")) {
@@ -161,9 +169,12 @@ final class ProxyCheck {
                 else if (line.startsWith("colo=")) colo = line.substring(5).trim();
             }
             exitText = loc == null ? null : country(loc) + (colo == null || colo.isEmpty() ? "" : " " + colo);
+            exitFails = 0;
         } catch (Exception e) {
             if (changed) exitText = null;
+            exitFails++;
         }
+        exitPending = exitText == null && exitFails > 0 && exitFails <= EXIT_QUICK_TRIES;
         return exitText;
     }
 
