@@ -2,8 +2,10 @@ plugins {
     id 'com.android.application'
 }
 
-// 每次 Actions 构建自动递增版本号
-def runNumber = (System.getenv('GITHUB_RUN_NUMBER') ?: '1').toInteger()
+// 每次 Actions 构建自动递增版本号。
+// GitHub 停用期间在本地打过 43–45（发在 GitLab），所以 Actions 的 run_number 加 10，保证新版号更大能覆盖安装。
+// 本地手动打包时直接设 BUILD_NUMBER。
+def runNumber = (System.getenv('BUILD_NUMBER') ?: ((System.getenv('GITHUB_RUN_NUMBER') ?: '1').toInteger() + 10).toString()).toInteger()
 
 android {
     namespace 'com.example.gproxyisland'

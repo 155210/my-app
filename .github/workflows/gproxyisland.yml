@@ -37,6 +37,10 @@ jobs:
         with:
           gradle-version: '8.9'
 
+      # 版本号 = run_number + 10（和 build.gradle 一致），发布的 tag 也用它
+      - name: 算版本号
+        run: echo "BUILD_NUMBER=$(( ${{ github.run_number }} + 10 ))" >> "$GITHUB_ENV"
+
       - name: 打包 gproxy 岛 APK
         run: gradle :gproxyisland:assembleRelease --no-daemon
 
@@ -53,7 +57,7 @@ jobs:
         if: github.event_name != 'pull_request'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: gproxyisland-${{ github.run_number }}
-          name: gproxy 岛 build ${{ github.run_number }}
+          tag_name: gproxyisland-${{ env.BUILD_NUMBER }}
+          name: gproxy 岛 build ${{ env.BUILD_NUMBER }}
           make_latest: true
           files: GproxyIsland.apk

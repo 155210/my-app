@@ -26,7 +26,7 @@ import java.util.List;
 
 /** 设置页：填 gproxy 地址和账号，授权悬浮窗，开关悬浮岛 */
 public class MainActivity extends Activity {
-    private EditText url, user, pass, interval, recent, budget, naiKey, clashApi, clashSecret, nodeAlias, allowedNodes;
+    private EditText url, user, pass, interval, recent, budget, naiKey, clashApi, clashSecret, nodeAlias, allowedNodes, gitlabToken;
     private CheckBox proxyCheck;
     private TextView naiText;
     private Button naiProbe;
@@ -61,7 +61,12 @@ public class MainActivity extends Activity {
         Button upd = button(box, "检查更新（当前 build " + Updater.current(this) + "）", false);
         TextView updMsg = label("", 12, MUTED);
         box.addView(updMsg);
-        upd.setOnClickListener(v -> checkUpdate(upd, updMsg, true));
+        gitlabToken = field(box, "GitLab 只读令牌（可不填。更新先查 GitHub，GitHub 不通时才用 GitLab 备份，那时要它；只存在本机，在 GitLab 建一个只勾 read_api 的令牌）",
+                Cfg.gitlabToken(this), InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        upd.setOnClickListener(v -> {
+            Cfg.sp(this).edit().putString("gitlabToken", gitlabToken.getText().toString().trim()).apply();
+            checkUpdate(upd, updMsg, true);
+        });
         checkUpdate(upd, updMsg, false);
         new Thread(() -> Updater.cleanup(this)).start();
 
@@ -195,7 +200,7 @@ public class MainActivity extends Activity {
 
         Button reset = button(box, "悬浮岛位置复原（回到顶部居中）", false);
         reset.setOnClickListener(v -> {
-            Cfg.sp(this).edit().remove("x").remove("y").apply();
+            Cfg.sp(this).edit().remove("x").remove("y").remove("anchor").remove("gap").apply();
             if (IslandService.running) {
                 IslandService.stop(this);
                 toggle.postDelayed(() -> {
@@ -561,6 +566,7 @@ public class MainActivity extends Activity {
                 .putString("allowedNodes", allowedNodes.getText().toString().trim())
                 .putFloat("budget", Math.max(0f, parseF(budget.getText().toString())))
                 .putString("naiKey", naiKey.getText().toString().trim())
+                .putString("gitlabToken", gitlabToken.getText().toString().trim())
                 .apply();
     }
 
@@ -675,7 +681,7 @@ public class MainActivity extends Activity {
                 msg.setText("先打开「允许安装未知应用」，返回再点一次");
                 return;
             }
-            msg.setText("下载中…（通知栏看进度，走 ghfast 代理）");
+            msg.setText("下载中…（通知栏看进度）");
             upd.setEnabled(false);
             Updater.download(this, latest, m -> runOnUiThread(() -> {
                 msg.setText(m);
@@ -686,7 +692,7 @@ public class MainActivity extends Activity {
         if (click) msg.setText("检查中…");
         new Thread(() -> {
             try {
-                Updater.Latest l = Updater.latest();
+                Updater.Latest l = Updater.latest(this);
                 runOnUiThread(() -> {
                     latest = l;
                     if (l.build > cur) {
@@ -698,7 +704,7 @@ public class MainActivity extends Activity {
                     }
                 });
             } catch (Exception e) {
-                if (click) runOnUiThread(() -> msg.setText("检查失败：" + e.getMessage() + "（GitHub 要开代理）"));
+                if (click) runOnUiThread(() -> msg.setText("检查失败：" + e.getMessage()));
             }
         }).start();
     }
