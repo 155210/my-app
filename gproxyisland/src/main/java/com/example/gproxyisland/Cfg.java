@@ -186,6 +186,11 @@ final class Cfg {
         return Math.max(0f, sp(c).getFloat("budget", 0f));
     }
 
+    /** GitLab 只读令牌（项目是私有的，检查更新要带；只存本机，不进代码） */
+    static String gitlabToken(Context c) {
+        return sp(c).getString("gitlabToken", "").trim();
+    }
+
     /** 岛的大小（百分比，60~140，默认 100） */
     static int scale(Context c) {
         return Math.max(60, Math.min(140, sp(c).getInt("scale", 100)));

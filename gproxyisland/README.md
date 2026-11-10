@@ -31,6 +31,6 @@
 | `IslandService.java` | 前台服务 + 悬浮窗胶囊 + 定时刷新 |
 | `GproxyClient.java` | 登录与用量接口 |
 | `Cfg.java` | SharedPreferences 设置项、数字格式化 |
-| `Updater.java` | 设置页「检查更新」：查 Releases 里最大的 `gproxyisland-N`，和 versionCode（= run_number）比，用系统下载器经 ghfast 下载后调起安装 |
+| `Updater.java` | 设置页「检查更新」：先查 GitHub Releases 里最大的 `gproxyisland-N`（经 ghfast 下载）；GitHub 不通且本机填了只读令牌时，改查 GitLab 备份项目（ID `88673288`）。和 versionCode 比，下载后调起安装 |
 
 签名固定为 `gproxyisland.keystore`，新版可覆盖安装。

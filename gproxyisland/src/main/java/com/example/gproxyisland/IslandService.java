@@ -242,6 +242,43 @@ public class IslandService extends Service {
         return h + dp(2);
     }
 
+    /** 水平对齐：0 = 居中，1 = 贴左（gap = 离左边距离），2 = 贴右（gap = 离右边距离）。
+     *  贴哪边就从哪边往里展开，展开 / 收起、文字变长变短都不会左右晃 */
+    private int anchor, gap;
+
+    private int screenW() {
+        return getResources().getDisplayMetrics().widthPixels;
+    }
+
+    /** 按对齐方式和宽度 w 摆窗口：一律按左边缘定位，宽度也写死，宽度和位置一次更新，靠右 / 居中展开时不跳。返回是否有变化 */
+    private boolean place(int w) {
+        int W = screenW();
+        int x;
+        if (anchor == 1) x = gap;
+        else if (anchor == 2) x = W - gap - w;
+        else x = (W - w) / 2;
+        x = Math.max(0, Math.min(x, W - w));
+        int g = Gravity.TOP | Gravity.LEFT;
+        if (g == lp.gravity && x == lp.x && w == lp.width) return false;
+        lp.gravity = g;
+        lp.x = x;
+        lp.width = w;
+        return true;
+    }
+
+    /** 先量出内容的新宽度，再把宽度和位置一起交给窗口 */
+    private void fit() {
+        if (root == null || lp == null) return;
+        root.measure(View.MeasureSpec.makeMeasureSpec(screenW(), View.MeasureSpec.AT_MOST),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
+        if (place(root.getMeasuredWidth()) && root.isAttachedToWindow()) {
+            try {
+                wm.updateViewLayout(root, lp);
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
     /** 岛的缩放（设置页滑条） */
     private float k = 1f;
 
@@ -313,8 +350,22 @@ public class IslandService extends Service {
         lp.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
         final boolean draggable = Cfg.draggable(this);
         // 拖到哪就存哪；锁定后也停在存的位置，只有「位置复原」清掉后才回顶部居中
-        lp.x = Cfg.sp(this).getInt("x", 0);
-        lp.y = Math.max(minY(), Cfg.sp(this).getInt("y", minY() + dp(4)));
+        android.content.SharedPreferences sp = Cfg.sp(this);
+        if (sp.contains("anchor")) {
+            anchor = sp.getInt("anchor", 0);
+            gap = sp.getInt("gap", 0);
+        } else {
+            // 旧版存的是离中心的偏移，粗略换算成贴边
+            int ox = sp.getInt("x", 0);
+            anchor = Math.abs(ox) < dp(20) ? 0 : ox < 0 ? 1 : 2;
+            gap = Math.max(0, screenW() / 2 - Math.abs(ox) - dp(60));
+        }
+        lp.y = Math.max(minY(), sp.getInt("y", minY() + dp(4)));
+        fit();
+        // 兜底：内容在 render 之外变了宽度（比如字体加载）时重新摆一次
+        root.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+            if (r - l != or - ol) root.post(this::fit);
+        });
         if (Build.VERSION.SDK_INT >= 28) {
             lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
         }
@@ -331,7 +382,9 @@ public class IslandService extends Service {
                     case MotionEvent.ACTION_DOWN:
                         downX = e.getRawX();
                         downY = e.getRawY();
-                        startX = lp.x;
+                        int[] loc = new int[2];
+                        root.getLocationOnScreen(loc);
+                        startX = loc[0];
                         startY = lp.y;
                         drag = false;
                         return true;
@@ -339,8 +392,9 @@ public class IslandService extends Service {
                         float mx = e.getRawX() - downX, my = e.getRawY() - downY;
                         if (!drag && Math.hypot(mx, my) > slop) drag = true;
                         if (drag && draggable) {
-                            int half = Math.max(0, (getResources().getDisplayMetrics().widthPixels - root.getWidth()) / 2);
-                            lp.x = Math.max(-half, Math.min(half, startX + Math.round(mx)));
+                            // 拖动时临时按左边缘定位
+                            lp.gravity = Gravity.TOP | Gravity.LEFT;
+                            lp.x = Math.max(0, Math.min(screenW() - root.getWidth(), startX + Math.round(mx)));
                             lp.y = Math.max(minY(), startY + Math.round(my));
                             try {
                                 wm.updateViewLayout(root, lp);
@@ -351,7 +405,25 @@ public class IslandService extends Service {
                     case MotionEvent.ACTION_UP:
                         if (drag) {
                             if (draggable) {
-                                Cfg.sp(IslandService.this).edit().putInt("x", lp.x).putInt("y", lp.y).apply();
+                                int w = root.getWidth(), left = lp.x, right = screenW() - left - w;
+                                if (Math.abs(left + w / 2 - screenW() / 2) < dp(24)) {
+                                    anchor = 0;
+                                    gap = 0;
+                                } else if (left <= right) {
+                                    anchor = 1;
+                                    gap = left;
+                                } else {
+                                    anchor = 2;
+                                    gap = right;
+                                }
+                                place(w);
+                                try {
+                                    wm.updateViewLayout(root, lp);
+                                } catch (Exception ignored) {
+                                }
+                                fit();
+                                Cfg.sp(IslandService.this).edit().putInt("anchor", anchor).putInt("gap", gap)
+                                        .putInt("y", lp.y).apply();
                             }
                         } else {
                             expanded = !expanded;
@@ -570,6 +642,7 @@ public class IslandService extends Service {
         }
         detail.setVisibility(expanded ? View.VISIBLE : View.GONE);
         bg.setCornerRadius(expanded ? sdp(20) : sdp(18));
+        fit();
 
         // 有请求在跑时每秒刷新计时
         ui.removeCallbacks(tick);
