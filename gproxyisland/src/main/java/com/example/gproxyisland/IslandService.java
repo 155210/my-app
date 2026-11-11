@@ -1,8 +1,6 @@
 package com.example.gproxyisland;
 
 import android.animation.LayoutTransition;
-import android.animation.ObjectAnimator;
-import android.animation.ValueAnimator;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -25,6 +23,11 @@ import android.os.Looper;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.provider.Settings;
+import android.text.SpannableStringBuilder;
+import android.text.TextUtils;
+import android.text.style.AbsoluteSizeSpan;
+import android.text.style.ForegroundColorSpan;
+import android.text.style.StyleSpan;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.MotionEvent;
@@ -41,9 +44,10 @@ import java.util.List;
 /**
  * 前台服务：在屏幕顶部画一颗黑色胶囊（悬浮窗），读 gproxy 用量。
  *
- * 收起时按优先级显示：
- *   生成中（黄灯闪烁 + 计时）＞ 刚完成/刚失败的提示（15 秒，绿灯/红灯）＞ 今日花费。
- * 状态点：绿 = 正常；黄 = 到预算提醒线；红 = 超预算或最近一次失败；灰 = 连不上 gproxy。
+ * 收起时固定三段「状态图标 · 主信息 · 次信息」，按优先级显示：
+ *   代理异常（整颗变红）＞ 生成中（跳动条 + 计时）＞ 刚完成/刚失败的提示（15 秒）＞ 今日花费（预算进度环）。
+ * 没设预算时图标是圆点：绿 = 正常；红 = 最近一次失败或出错；灰 = 连不上 gproxy。
+ * 点一下展开成面板；展开后长按显示调试信息。
  *
  * 刷新：空闲按设置的间隔；有请求在跑或刚跑完的 20 秒内每 2 秒一次。熄屏暂停。
  * 「生成中」读 gproxy 上游日志里 state = in_progress 的行，需要 gproxy 打开「上游日志」和「上游日志正文」。
@@ -53,7 +57,6 @@ public class IslandService extends Service {
     private static final String CH = "island";
     private static final int NID = 1;
 
-    private static final int GREEN = 0xFF5DCAA5, AMBER = 0xFFEF9F27, RED = 0xFFE24B4A, GREY = 0xFF888780;
     private static final long FAST_MS = 2000, ACTIVE_TAIL_MS = 20000, POP_MS = 15000, PROXY_MS = 10000;
     /** 多久读一次 gproxy 日志开关、额度历史 */
     private static final long FLAGS_MS = 60000, QUOTA_MS = 60000;
@@ -62,11 +65,12 @@ public class IslandService extends Service {
 
     private WindowManager wm;
     private WindowManager.LayoutParams lp;
-    private LinearLayout root, detail;
-    private TextView head;
-    private View dot;
-    private GradientDrawable bg, dotBg;
-    private ObjectAnimator blink;
+    private LinearLayout root, row, detail;
+    /** 收起态的三段：图标、主信息、分隔线、次信息 */
+    private Ui.Glyph glyph;
+    private TextView head, tail;
+    private View sep;
+    private GradientDrawable bg;
 
     private final Handler ui = new Handler(Looper.getMainLooper());
     private HandlerThread worker;
@@ -96,14 +100,35 @@ public class IslandService extends Service {
     private long updatedAt;
     private GproxyClient.LogFlags flags;
     private Diag diag = new Diag();
-    private List<String> quotaLines = new ArrayList<>();
+    private List<QItem> quota = new ArrayList<>();
+    /** 展开后长按切换 */
+    private boolean showDebug;
     /** 岛上「查询额度」的状态，null = 空闲 */
     private String probeMsg;
     private ProxyCheck.State proxy;
     private boolean probing;
     private String enableMsg;
 
-    /** 调试信息：展开岛最下面显示，方便截图定位 */
+    /** 展开面板里一个凭据的额度 */
+    static class QItem {
+        String name, warn;
+        long at;
+        final List<QRow> rows = new ArrayList<>();
+    }
+
+    /** 额度里的一行：有进度条（fill 0~1）或只有文字（fill = -1） */
+    static class QRow {
+        String label, right;
+        float fill = -1;
+        int color = Ui.GREEN;
+
+        QRow(String label, String right) {
+            this.label = label;
+            this.right = right;
+        }
+    }
+
+    /** 调试信息：展开后长按显示，方便截图定位 */
     static class Diag {
         long polls, lastPollAt, lastOkAt, newestAt;
         String newestId = "", newestState, inflightErr, lastErr;
@@ -195,7 +220,7 @@ public class IslandService extends Service {
         if (io != null) io.removeCallbacksAndMessages(null);
         if (worker != null) worker.quitSafely();
         ui.removeCallbacksAndMessages(null);
-        if (blink != null) blink.cancel();
+        if (glyph != null) glyph.stop();
         if (root != null && wm != null) {
             try {
                 wm.removeView(root);
@@ -290,13 +315,42 @@ public class IslandService extends Service {
         return dp(v * k);
     }
 
+    /** 按岛大小缩放的 sp，换成像素 */
+    private int spx(float sp) {
+        return Math.round(TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, sp * k, getResources().getDisplayMetrics()));
+    }
+
     private TextView text(float sp, int color, boolean bold) {
         TextView t = new TextView(this);
         t.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp * k);
         t.setTextColor(color);
         t.setSingleLine(true);
+        t.setIncludeFontPadding(false);
         if (bold) t.setTypeface(Typeface.DEFAULT_BOLD);
         return t;
+    }
+
+    private LinearLayout hrow() {
+        LinearLayout l = new LinearLayout(this);
+        l.setOrientation(LinearLayout.HORIZONTAL);
+        l.setGravity(Gravity.CENTER_VERTICAL);
+        l.setBaselineAligned(false);
+        return l;
+    }
+
+    private static LinearLayout.LayoutParams lp(int w, int h, float weight) {
+        return new LinearLayout.LayoutParams(w, h, weight);
+    }
+
+    private static final int WRAP = LinearLayout.LayoutParams.WRAP_CONTENT, MATCH = LinearLayout.LayoutParams.MATCH_PARENT;
+
+    /** 一段文字里前半截和后半截用不同颜色 / 粗细 */
+    private static CharSequence two(String a, int colorA, boolean boldA, String b, int colorB) {
+        SpannableStringBuilder sb = new SpannableStringBuilder(a + b);
+        sb.setSpan(new ForegroundColorSpan(colorA), 0, a.length(), 0);
+        if (boldA) sb.setSpan(new StyleSpan(Typeface.BOLD), 0, a.length(), 0);
+        sb.setSpan(new ForegroundColorSpan(colorB), a.length(), sb.length(), 0);
+        return sb;
     }
 
     private void buildIsland() {
@@ -305,39 +359,35 @@ public class IslandService extends Service {
 
         root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(sdp(14), sdp(7), sdp(14), sdp(7));
         bg = new GradientDrawable();
         bg.setColor(Color.BLACK);
         bg.setCornerRadius(sdp(18));
         root.setBackground(bg);
         root.setLayoutTransition(new LayoutTransition());
 
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        dot = new View(this);
-        dotBg = new GradientDrawable();
-        dotBg.setShape(GradientDrawable.OVAL);
-        dotBg.setColor(GREY);
-        dot.setBackground(dotBg);
-        LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(sdp(7), sdp(7));
-        dlp.rightMargin = sdp(8);
-        row.addView(dot, dlp);
-        head = text(13, Color.WHITE, true);
+        // 收起态固定三段：状态图标 · 主信息 · 次信息
+        row = hrow();
+        glyph = new Ui.Glyph(this);
+        LinearLayout.LayoutParams glp = new LinearLayout.LayoutParams(sdp(20), sdp(20));
+        glp.rightMargin = sdp(9);
+        row.addView(glyph, glp);
+        head = text(14, Ui.FG, true);
+        head.setEllipsize(TextUtils.TruncateAt.END);
         head.setText("gproxy 连接中…");
         row.addView(head);
+        sep = new View(this);
+        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(Math.max(1, dp(1)), sdp(14));
+        slp.leftMargin = sdp(10);
+        slp.rightMargin = sdp(10);
+        row.addView(sep, slp);
+        tail = text(14, Ui.MUTED, false);
+        row.addView(tail);
         root.addView(row);
 
         detail = new LinearLayout(this);
         detail.setOrientation(LinearLayout.VERTICAL);
         detail.setVisibility(View.GONE);
-        detail.setPadding(0, sdp(6), 0, sdp(2));
         root.addView(detail);
-
-        blink = ObjectAnimator.ofFloat(dot, "alpha", 1f, 0.25f);
-        blink.setDuration(600);
-        blink.setRepeatCount(ValueAnimator.INFINITE);
-        blink.setRepeatMode(ValueAnimator.REVERSE);
 
         int type = Build.VERSION.SDK_INT >= 26
                 ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -364,7 +414,7 @@ public class IslandService extends Service {
             gap = Math.max(0, screenW() / 2 - Math.abs(ox) - dp(60));
         }
         lp.y = Math.max(minY(), sp.getInt("y", minY() + dp(4)));
-        fit();
+        render();
         // 兜底：内容在 render 之外变了宽度（比如字体加载）时重新摆一次
         root.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
             if (r - l != or - ol) root.post(this::fit);
@@ -377,7 +427,14 @@ public class IslandService extends Service {
         root.setOnTouchListener(new View.OnTouchListener() {
             float downX, downY;
             int startX, startY;
-            boolean drag;
+            boolean drag, held;
+            /** 展开时长按：显示 / 收起调试信息 */
+            final Runnable hold = () -> {
+                if (!expanded || !Cfg.debug(IslandService.this)) return;
+                held = true;
+                showDebug = !showDebug;
+                render();
+            };
 
             @Override
             public boolean onTouch(View v, MotionEvent e) {
@@ -390,10 +447,15 @@ public class IslandService extends Service {
                         startX = loc[0];
                         startY = lp.y;
                         drag = false;
+                        held = false;
+                        ui.postDelayed(hold, ViewConfiguration.getLongPressTimeout());
                         return true;
                     case MotionEvent.ACTION_MOVE:
                         float mx = e.getRawX() - downX, my = e.getRawY() - downY;
-                        if (!drag && Math.hypot(mx, my) > slop) drag = true;
+                        if (!drag && Math.hypot(mx, my) > slop) {
+                            drag = true;
+                            ui.removeCallbacks(hold);
+                        }
                         if (drag && draggable) {
                             // 拖动时临时按左边缘定位
                             lp.gravity = Gravity.TOP | Gravity.LEFT;
@@ -405,7 +467,12 @@ public class IslandService extends Service {
                             }
                         }
                         return true;
+                    case MotionEvent.ACTION_CANCEL:
+                        ui.removeCallbacks(hold);
+                        return true;
                     case MotionEvent.ACTION_UP:
+                        ui.removeCallbacks(hold);
+                        if (held) return true;
                         if (drag) {
                             if (draggable) {
                                 int w = root.getWidth(), left = lp.x, right = screenW() - left - w;
@@ -457,200 +524,401 @@ public class IslandService extends Service {
         return n;
     }
 
-    /** 正常状态的点颜色：预算、失败 */
-    private int baseColor() {
-        if (failStreak() > 0) return RED;
+    /** 今日花费占预算的比例；没设预算或还没数据 = -1 */
+    private double budgetRatio() {
         float budget = Cfg.budget(this);
-        if (budget > 0 && summary != null) {
-            double ratio = summary.cost / budget;
-            if (ratio >= 1) return RED;
-            if (ratio >= WARN_RATIO) return AMBER;
-        }
-        return error != null ? RED : GREEN;
+        return budget > 0 && summary != null ? summary.cost / budget : -1;
     }
 
-    private String costText() {
-        float budget = Cfg.budget(this);
-        String c = Cfg.money(summary.cost);
-        return budget > 0 ? c + "/" + Cfg.money(budget) : c;
+    /** 预算进度的颜色 */
+    private static int ratioColor(double ratio) {
+        return ratio >= 1 ? Ui.RED : ratio >= WARN_RATIO ? Ui.AMBER : Ui.GREEN;
     }
 
     private void render() {
         if (root == null || dead) return;
         long now = System.currentTimeMillis();
-        int max = getResources().getDisplayMetrics().widthPixels - dp(48);
-        head.setMaxWidth(max);
-        boolean pulsing = false;
-
-        boolean proxyBad = proxy != null && !proxy.ok();
-        if (proxyBad && !expanded) {
-            // 代理没开 / 不是指定节点：最高优先级，盖过连不上、生成中、完成提示
-            dotBg.setColor(RED);
-            head.setText(proxy.on()
-                    ? "⚠ 代理错误 · 不是指定节点" + (proxy.node != null ? " · " + proxy.node : "")
-                    : "⚠ 代理没开（NekoBox 没启动？）");
-        } else if (summary == null) {
-            dotBg.setColor(error != null && !error.startsWith("连不上") ? RED : GREY);
-            head.setText(error != null ? error : "gproxy 连接中…");
-        } else if (!flights.isEmpty() && !expanded) {
-            GproxyClient.Flight f = flights.get(0);
-            dotBg.setColor(AMBER);
-            pulsing = true;
-            // 上游日志进行中时 firstResponseAtMs 不会实时写回，所以不区分「等待/生成」
-            head.setText("生成中 · " + Cfg.model(f.model)
-                    + " · " + Cfg.secs(now - f.startedAt)
-                    + (flights.size() > 1 ? " +" + (flights.size() - 1) : ""));
-        } else if (popRecord != null && !expanded) {
-            GproxyClient.Record r = popRecord;
-            dotBg.setColor(r.failed() ? RED : GREEN);
-            if (r.failed()) {
-                head.setText("✗ " + Cfg.model(r.model) + " 失败");
-            } else {
-                String d = Cfg.dur(r.durationMs);
-                head.setText("✓ " + Cfg.model(r.model)
-                        + (d.isEmpty() ? "" : " · " + d)
-                        + (r.cost >= 0 ? " · " + Cfg.money(r.cost) : ""));
-            }
-        } else {
-            boolean busy = expanded && !flights.isEmpty() && !proxyBad;
-            dotBg.setColor(proxyBad ? RED : busy ? AMBER : baseColor());
-            pulsing = busy;
-            head.setText(expanded
-                    ? "今日 " + summary.requests + " 次 · " + costText()
-                    : (proxyBad ? (proxy.on() ? "⚠ 代理错误 · " : "⚠ 代理没开 · ") : "")
-                    + costText() + " · " + summary.requests + "次");
-        }
-
-        if (pulsing) {
-            if (!blink.isStarted()) blink.start();
-        } else if (blink.isStarted()) {
-            blink.cancel();
-            dot.setAlpha(1f);
-        }
-
+        renderPill(now);
         detail.removeAllViews();
-        if (expanded) {
-            if (summary != null) {
-                TextView s = text(12, 0xFFB4B2A9, false);
-                s.setMaxWidth(max);
-                s.setText("入 " + Cfg.w(summary.input) + " · 出 " + Cfg.w(summary.output)
-                        + " · 缓存 " + Cfg.w(summary.cached)
-                        + (updatedAt > 0 ? " · " + Cfg.hm(updatedAt) + " 更新" : ""));
-                detail.addView(s);
-
-                float budget = Cfg.budget(this);
-                if (budget > 0) {
-                    double ratio = summary.cost / budget;
-                    TextView b = text(12, ratio >= 1 ? RED : ratio >= WARN_RATIO ? AMBER : 0xFFB4B2A9, false);
-                    b.setMaxWidth(max);
-                    b.setText("预算 " + Cfg.money(summary.cost) + " / " + Cfg.money(budget)
-                            + " · " + Math.round(ratio * 100) + "%"
-                            + (ratio >= 1 ? " · 已超" : ratio >= WARN_RATIO ? " · 快到了" : ""));
-                    detail.addView(b);
-                }
-            }
-            int fails = failStreak();
-            if (fails > 0) {
-                TextView t = text(12, RED, false);
-                t.setMaxWidth(max);
-                t.setText(fails >= records.size() && fails > 1
-                        ? "最近 " + fails + " 次都失败了" : "最近连续失败 " + fails + " 次");
-                detail.addView(t);
-            }
-            if (error != null && summary != null) {
-                TextView e = text(12, RED, false);
-                e.setMaxWidth(max);
-                e.setText(error);
-                detail.addView(e);
-            }
-            for (GproxyClient.Flight f : flights) {
-                TextView t = text(12, AMBER, false);
-                t.setMaxWidth(max);
-                t.setPadding(0, dp(5), 0, 0);
-                t.setText("▶ 生成中 " + Cfg.model(f.model)
-                        + " · " + Cfg.secs(now - f.startedAt));
-                detail.addView(t);
-            }
-            int show = Math.min(Cfg.recent(this), records.size());
-            for (int i = 0; i < show; i++) {
-                GproxyClient.Record r = records.get(i);
-                TextView t = text(12, r.failed() ? 0xFFF09595 : 0xFFF1EFE8, false);
-                t.setMaxWidth(max);
-                t.setPadding(0, dp(5), 0, 0);
-                String d = Cfg.dur(r.durationMs);
-                t.setText(Cfg.hm(r.startedAt) + "  " + Cfg.model(r.model)
-                        + "  入" + Cfg.w(r.input) + " 出" + Cfg.w(r.output)
-                        + (r.cost >= 0 ? "  " + Cfg.money(r.cost) : "")
-                        + (r.failed() ? "  失败" : d.isEmpty() ? "" : "  " + d));
-                detail.addView(t);
-            }
-            if (summary != null && records.isEmpty() && Cfg.recent(this) > 0) {
-                TextView t = text(12, GREY, false);
-                t.setText("今天还没有请求");
-                detail.addView(t);
-            }
-            if (proxy != null) {
-                TextView t = text(12, proxy.ok() ? 0xFFB4B2A9 : RED, false);
-                t.setMaxWidth(max);
-                t.setSingleLine(false);
-                t.setPadding(0, dp(5), 0, 0);
-                t.setText(proxy.on()
-                        ? (proxy.wrongNode ? "⚠ 代理错误：不是指定节点" : "代理已开") + (proxy.exit != null ? " · 出口 " + proxy.exit : "") + (proxy.node != null ? " · 节点 " + proxy.node
-                        : (proxy.nodeType != null ? " · " + proxy.nodeType : "")
-                        + (!proxy.listening
-                        ? (Cfg.listenerGranted(this)
-                        ? " · 通知使用权已给但还没连上，关掉岛再开（不行就重启手机）"
-                        : " · 节点名要在设置里给「通知使用权」")
-                        : !proxy.notif
-                        ? " · 没看到 NekoBox 通知（在系统里把 NekoBox 的通知打开）"
-                        : " · NekoBox 通知里没有标题"))
-                        : "⚠ 代理没开（NekoBox 没启动？）");
-                detail.addView(t);
-            }
-            if (flags != null && !flags.live()) {
-                TextView t = text(12, AMBER, false);
-                t.setMaxWidth(max);
-                t.setSingleLine(false);
-                t.setPadding(0, dp(6), 0, 0);
-                t.setText(enableMsg != null ? enableMsg
-                        : "「生成中」不可用：gproxy 没开" + (flags.upstream ? "「上游日志正文」" : "「上游日志」和「上游日志正文」")
-                        + "。点这行一键打开");
-                t.setOnClickListener(v -> enableLog());
-                detail.addView(t);
-            }
-            for (String q : quotaLines) {
-                TextView t = text(12, q.contains("⚠") ? AMBER : 0xFFB4B2A9, false);
-                t.setMaxWidth(max);
-                t.setSingleLine(false);
-                t.setPadding(0, dp(5), 0, 0);
-                t.setText(q);
-                detail.addView(t);
-            }
-            {
-                TextView t = text(12, probing ? GREY : GREEN, true);
-                t.setMaxWidth(max);
-                t.setSingleLine(false);
-                t.setPadding(0, dp(6), 0, dp(2));
-                t.setText(probing ? "额度查询中…" : "⟳ 查询额度（会请求上游）" + (probeMsg != null ? " · " + probeMsg : ""));
-                if (!probing) t.setOnClickListener(v -> probeAll());
-                detail.addView(t);
-            }
-            if (Cfg.debug(this)) {
-                TextView t = text(10, GREY, false);
-                t.setMaxWidth(max);
-                t.setSingleLine(false);
-                t.setPadding(0, dp(6), 0, 0);
-                t.setText(debugText(now));
-                detail.addView(t);
-            }
-        }
+        if (expanded) renderPanel(now);
+        row.setVisibility(expanded ? View.GONE : View.VISIBLE);
         detail.setVisibility(expanded ? View.VISIBLE : View.GONE);
-        bg.setCornerRadius(expanded ? sdp(20) : sdp(18));
+        if (expanded) {
+            bg.setColor(Color.BLACK);
+            bg.setStroke(0, 0);
+            bg.setCornerRadius(sdp(26));
+            root.setPadding(sdp(18), sdp(18), sdp(18), sdp(14));
+        } else {
+            bg.setCornerRadius(sdp(18));
+            root.setPadding(sdp(9), sdp(8), sdp(14), sdp(8));
+        }
         fit();
 
         // 有请求在跑时每秒刷新计时
         ui.removeCallbacks(tick);
         if (!flights.isEmpty()) ui.postDelayed(tick, 1000);
+    }
+
+    /** 收起态：状态图标 · 主信息 · 次信息。优先级：代理异常 ＞ 连不上 ＞ 生成中 ＞ 完成 / 失败提示 ＞ 今日花费 */
+    private void renderPill(long now) {
+        int pillBg = Color.BLACK, fg = Ui.FG, stroke = 0;
+        int mode = Ui.Glyph.DOT, color = Ui.GREY, tailColor = Ui.MUTED;
+        float progress = 0;
+        boolean tailBold = false;
+        CharSequence main, side = null;
+
+        boolean proxyBad = proxy != null && !proxy.ok();
+        if (proxyBad) {
+            // 代理没开 / 不是指定节点：整颗岛变红，盖过别的状态
+            pillBg = Ui.RED;
+            fg = Color.BLACK;
+            tailColor = Color.BLACK;
+            mode = Ui.Glyph.SHIELD;
+            color = Color.BLACK;
+            main = proxy.on() ? "代理错误" : "代理没开";
+            side = proxy.on() ? (proxy.node != null ? proxy.node : "不是指定节点") : "NekoBox";
+            tailBold = true;
+        } else if (summary == null) {
+            color = error != null && !error.startsWith("连不上") ? Ui.RED : Ui.GREY;
+            main = error != null ? error : "gproxy 连接中…";
+        } else if (!flights.isEmpty()) {
+            GproxyClient.Flight f = flights.get(0);
+            mode = Ui.Glyph.BARS;
+            color = Ui.AMBER;
+            // 上游日志进行中时 firstResponseAtMs 不会实时写回，所以不区分「等待/生成」
+            main = Cfg.model(f.model) + (flights.size() > 1 ? " +" + (flights.size() - 1) : "");
+            side = Cfg.clock(now - f.startedAt);
+            tailColor = Ui.AMBER;
+            tailBold = true;
+        } else if (popRecord != null) {
+            GproxyClient.Record r = popRecord;
+            if (r.failed()) {
+                mode = Ui.Glyph.CROSS;
+                color = Ui.RED;
+                stroke = Ui.RED;
+                main = Cfg.model(r.model) + " 失败";
+                int n = failStreak();
+                if (n > 1) {
+                    side = "连续 " + n + " 次";
+                    tailColor = Ui.RED_SOFT;
+                }
+            } else {
+                mode = Ui.Glyph.CHECK;
+                color = Ui.GREEN;
+                String d = Cfg.dur(r.durationMs);
+                main = d.isEmpty() ? Cfg.model(r.model) : two(Cfg.model(r.model), Ui.FG, true, "  " + d, Ui.MUTED);
+                if (r.cost >= 0) {
+                    side = "+" + Cfg.money(r.cost);
+                    tailColor = Ui.GREEN;
+                    tailBold = true;
+                }
+            }
+        } else {
+            double ratio = budgetRatio();
+            boolean bad = failStreak() > 0 || error != null;
+            if (ratio >= 0 && !bad) {
+                // 设了预算：圆点换成进度环，一眼看出用了多少
+                mode = Ui.Glyph.RING;
+                color = ratioColor(ratio);
+                progress = (float) Math.min(1, ratio);
+            } else {
+                color = bad ? Ui.RED : Ui.GREEN;
+            }
+            main = Cfg.money(summary.cost);
+            if (ratio >= WARN_RATIO) {
+                float budget = Cfg.budget(this);
+                side = ratio >= 1 ? "超 " + Cfg.money(summary.cost - budget) : "剩 " + Cfg.money(budget - summary.cost);
+                tailColor = ratioColor(ratio);
+                tailBold = true;
+            } else {
+                side = summary.requests + " 次";
+            }
+        }
+
+        bg.setColor(pillBg);
+        bg.setStroke(stroke != 0 ? Math.max(2, dp(1.5f)) : 0, stroke);
+        glyph.set(mode, color, progress);
+        head.setTextColor(fg);
+        head.setText(main);
+        head.setMaxWidth(screenW() - dp(48) - sdp(side == null ? 44 : 130));
+        boolean hasSide = side != null;
+        sep.setVisibility(hasSide ? View.VISIBLE : View.GONE);
+        tail.setVisibility(hasSide ? View.VISIBLE : View.GONE);
+        if (hasSide) {
+            sep.setBackgroundColor(pillBg == Ui.RED ? 0xFF7A2625 : 0xFF33363D);
+            tail.setText(side);
+            tail.setTextColor(tailColor);
+            tail.setTypeface(tailBold ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
+        }
+    }
+
+    /** 往展开面板里加一块，上面留 top（已按岛大小缩放）的空 */
+    private void add(View v, int top) {
+        LinearLayout.LayoutParams p = lp(MATCH, WRAP, 0);
+        p.topMargin = top;
+        detail.addView(v, p);
+    }
+
+    private TextView caption(String s) {
+        TextView t = text(11, Ui.MUTED, true);
+        t.setLetterSpacing(0.06f);
+        t.setText(s);
+        return t;
+    }
+
+    private TextView note(String s, int color) {
+        TextView t = text(12, color, false);
+        t.setSingleLine(false);
+        t.setLineSpacing(0, 1.25f);
+        t.setText(s);
+        return t;
+    }
+
+    /** 展开面板：今日花费 → 进行中 → 最近请求 → 上游额度 → 代理和操作 */
+    private void renderPanel(long now) {
+        int inner = Math.min(screenW() - dp(24), sdp(366)) - sdp(36);
+        detail.setLayoutParams(new LinearLayout.LayoutParams(inner, WRAP));
+        boolean first = true;
+
+        if (proxy != null && !proxy.ok()) {
+            TextView t = note(proxy.on()
+                    ? "代理错误：不是指定节点" + (proxy.node != null ? " · " + proxy.node : "")
+                    : "代理没开（NekoBox 没启动？）", Color.BLACK);
+            t.setTypeface(Typeface.DEFAULT_BOLD);
+            t.setBackground(Ui.round(Ui.RED, sdp(12)));
+            t.setPadding(sdp(12), sdp(9), sdp(12), sdp(9));
+            add(t, 0);
+            first = false;
+        }
+
+        // ── 今日 ──
+        if (summary != null) {
+            float budget = Cfg.budget(this);
+            LinearLayout top = hrow();
+            top.setGravity(Gravity.BOTTOM);
+            TextView cost = text(13, Ui.MUTED, false);
+            SpannableStringBuilder sb = new SpannableStringBuilder(Cfg.money(summary.cost));
+            sb.setSpan(new AbsoluteSizeSpan(spx(30)), 0, sb.length(), 0);
+            sb.setSpan(new StyleSpan(Typeface.BOLD), 0, sb.length(), 0);
+            sb.setSpan(new ForegroundColorSpan(Ui.FG), 0, sb.length(), 0);
+            if (budget > 0) sb.append("  / " + Cfg.money(budget) + " 预算");
+            cost.setText(sb);
+            top.addView(cost, lp(0, WRAP, 1));
+            TextView cnt = text(13, Ui.MUTED, false);
+            cnt.setText("今日 " + summary.requests + " 次");
+            top.addView(cnt);
+            add(top, first ? 0 : sdp(14));
+            double ratio = budgetRatio();
+            if (ratio >= 0) {
+                Ui.Bar bar = new Ui.Bar(this).set((float) ratio, ratioColor(ratio));
+                LinearLayout.LayoutParams bp = lp(MATCH, sdp(6), 0);
+                bp.topMargin = sdp(10);
+                detail.addView(bar, bp);
+                if (ratio >= WARN_RATIO) {
+                    add(note(ratio >= 1 ? "已超出今日预算" : "已用 " + Math.round(ratio * 100) + "% 预算，快到了", ratioColor(ratio)), sdp(6));
+                }
+            }
+            LinearLayout trio = hrow();
+            String[][] cells = {{"输入", Cfg.w(summary.input)}, {"输出", Cfg.w(summary.output)}, {"缓存", Cfg.w(summary.cached)}};
+            for (String[] c : cells) {
+                LinearLayout cell = new LinearLayout(this);
+                cell.setOrientation(LinearLayout.VERTICAL);
+                TextView l = text(11, Ui.MUTED, false);
+                l.setText(c[0]);
+                cell.addView(l);
+                TextView v = text(15, Ui.FG, true);
+                v.setText(c[1]);
+                LinearLayout.LayoutParams vp = lp(WRAP, WRAP, 0);
+                vp.topMargin = sdp(3);
+                cell.addView(v, vp);
+                trio.addView(cell, lp(0, WRAP, 1));
+            }
+            add(trio, sdp(12));
+        } else {
+            TextView t = note(error != null ? error : "gproxy 连接中…", error != null ? Ui.RED_SOFT : Ui.MUTED);
+            t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14 * k);
+            add(t, first ? 0 : sdp(14));
+        }
+        int fails = failStreak();
+        if (fails > 0) {
+            add(note(fails >= records.size() && fails > 1
+                    ? "最近 " + fails + " 次都失败了" : "最近连续失败 " + fails + " 次", Ui.RED_SOFT), sdp(10));
+        }
+        if (error != null && summary != null) add(note(error, Ui.RED_SOFT), sdp(10));
+
+        // ── 进行中 ──
+        boolean firstFlight = true;
+        for (GproxyClient.Flight f : flights) {
+            LinearLayout r = hrow();
+            r.setBackground(Ui.round(Ui.AMBER_BG, sdp(14)));
+            r.setPadding(sdp(12), sdp(10), sdp(12), sdp(10));
+            Ui.Glyph g = new Ui.Glyph(this);
+            g.set(Ui.Glyph.BARS, Ui.AMBER, 0);
+            LinearLayout.LayoutParams gp = new LinearLayout.LayoutParams(sdp(18), sdp(18));
+            gp.rightMargin = sdp(10);
+            r.addView(g, gp);
+            TextView m = text(14, Ui.FG, true);
+            m.setEllipsize(TextUtils.TruncateAt.END);
+            m.setText("生成中 · " + Cfg.model(f.model));
+            r.addView(m, lp(0, WRAP, 1));
+            TextView c = text(14, Ui.AMBER, true);
+            c.setText(Cfg.clock(now - f.startedAt));
+            r.addView(c);
+            add(r, firstFlight ? sdp(16) : sdp(6));
+            firstFlight = false;
+        }
+
+        // ── 最近请求 ──
+        int show = Math.min(Cfg.recent(this), records.size());
+        if (Cfg.recent(this) > 0 && summary != null) {
+            add(caption("最近请求"), sdp(16));
+            if (show == 0) add(note("今天还没有请求", Ui.MUTED), sdp(8));
+        }
+        for (int i = 0; i < show; i++) {
+            GproxyClient.Record rec = records.get(i);
+            boolean bad = rec.failed();
+            LinearLayout r = hrow();
+            TextView time = text(13, Ui.MUTED, false);
+            time.setText(Cfg.hm(rec.startedAt));
+            r.addView(time, lp(sdp(46), WRAP, 0));
+            TextView mid = text(13, Ui.FG, false);
+            mid.setEllipsize(TextUtils.TruncateAt.END);
+            String tokens = (rec.input >= 0 ? "  入" + Cfg.w(rec.input) : "") + (rec.output >= 0 ? " 出" + Cfg.w(rec.output) : "");
+            mid.setText(two(Cfg.model(rec.model), bad ? Ui.RED_SOFT : Ui.FG, true, tokens, bad ? Ui.RED_SOFT : Ui.MUTED));
+            r.addView(mid, lp(0, WRAP, 1));
+            TextView dur = text(13, bad ? Ui.RED_SOFT : Ui.MUTED, false);
+            dur.setGravity(Gravity.END);
+            dur.setText(bad ? "失败" : Cfg.dur(rec.durationMs));
+            r.addView(dur, lp(sdp(52), WRAP, 0));
+            TextView cost = text(13, rec.cost >= 0 ? Ui.FG : Ui.MUTED, rec.cost >= 0);
+            cost.setGravity(Gravity.END);
+            cost.setText(rec.cost >= 0 ? Cfg.money(rec.cost) : "—");
+            r.addView(cost, lp(sdp(56), WRAP, 0));
+            add(r, sdp(8));
+        }
+
+        // ── 「生成中」不可用 ──
+        if (flags != null && !flags.live()) {
+            TextView t = note(enableMsg != null ? enableMsg
+                    : "「生成中」不可用：gproxy 没开" + (flags.upstream ? "「上游日志正文」" : "「上游日志」和「上游日志正文」")
+                    + "。点这里一键打开", Ui.AMBER);
+            t.setBackground(Ui.round(Ui.AMBER_BG, sdp(12)));
+            t.setPadding(sdp(12), sdp(10), sdp(12), sdp(10));
+            t.setOnClickListener(v -> enableLog());
+            add(t, sdp(14));
+        }
+
+        // ── 上游额度 ──
+        if (!quota.isEmpty()) {
+            long at = 0;
+            for (QItem q : quota) at = Math.max(at, q.at);
+            LinearLayout h = hrow();
+            h.addView(caption("上游额度"), lp(0, WRAP, 1));
+            if (at > 0) {
+                TextView t = text(11, Ui.MUTED, false);
+                t.setText(Cfg.when(at) + " 查询");
+                h.addView(t);
+            }
+            add(h, sdp(16));
+        }
+        for (QItem q : quota) {
+            LinearLayout r = hrow();
+            TextView name = text(13, Ui.FG, false);
+            name.setEllipsize(TextUtils.TruncateAt.END);
+            name.setText(q.name);
+            LinearLayout.LayoutParams np = lp(sdp(92), WRAP, 0);
+            np.rightMargin = sdp(10);
+            r.addView(name, np);
+            LinearLayout col = new LinearLayout(this);
+            col.setOrientation(LinearLayout.VERTICAL);
+            for (int i = 0; i < q.rows.size(); i++) {
+                QRow qr = q.rows.get(i);
+                LinearLayout line = hrow();
+                TextView l = text(11, Ui.MUTED, false);
+                l.setEllipsize(TextUtils.TruncateAt.END);
+                l.setText(qr.label);
+                if (qr.fill >= 0) {
+                    line.addView(l, lp(sdp(40), WRAP, 0));
+                    LinearLayout.LayoutParams bp = lp(0, sdp(5), 1);
+                    bp.leftMargin = sdp(6);
+                    bp.rightMargin = sdp(8);
+                    line.addView(new Ui.Bar(this).set(qr.fill, qr.color), bp);
+                } else {
+                    line.addView(l, lp(0, WRAP, 1));
+                }
+                TextView v = text(12, qr.fill >= 0 && qr.color != Ui.GREEN ? qr.color : Ui.FG, false);
+                v.setGravity(Gravity.END);
+                v.setText(qr.right);
+                line.addView(v, lp(qr.fill >= 0 ? sdp(46) : WRAP, WRAP, 0));
+                LinearLayout.LayoutParams lpp = lp(MATCH, WRAP, 0);
+                if (i > 0) lpp.topMargin = sdp(5);
+                col.addView(line, lpp);
+            }
+            r.addView(col, lp(0, WRAP, 1));
+            add(r, sdp(10));
+            if (q.warn != null) {
+                TextView w = note(q.warn, Ui.AMBER);
+                w.setPadding(sdp(102), 0, 0, 0);
+                add(w, sdp(5));
+            }
+        }
+
+        // ── 代理 + 操作 ──
+        View line = new View(this);
+        line.setBackgroundColor(Ui.LINE);
+        LinearLayout.LayoutParams dl = lp(MATCH, Math.max(1, dp(1)), 0);
+        dl.topMargin = sdp(14);
+        detail.addView(line, dl);
+        LinearLayout foot = hrow();
+        if (proxy != null && proxy.ok()) {
+            LinearLayout chip = hrow();
+            chip.setBackground(Ui.round(Ui.CARD, sdp(15)));
+            chip.setPadding(sdp(10), sdp(7), sdp(11), sdp(7));
+            View dot = new View(this);
+            dot.setBackground(Ui.round(Ui.GREEN, sdp(3)));
+            LinearLayout.LayoutParams dp6 = new LinearLayout.LayoutParams(sdp(6), sdp(6));
+            dp6.rightMargin = sdp(6);
+            chip.addView(dot, dp6);
+            TextView t = text(12, Ui.FG, false);
+            t.setEllipsize(TextUtils.TruncateAt.END);
+            String where = (proxy.node != null ? proxy.node : proxy.nodeType != null ? proxy.nodeType : "已开")
+                    + (proxy.exit != null ? " · " + proxy.exit : "");
+            t.setText("代理 " + where);
+            chip.addView(t);
+            foot.addView(chip, lp(0, WRAP, 1));
+            View gapV = new View(this);
+            foot.addView(gapV, lp(sdp(8), 1, 0));
+        } else {
+            foot.addView(new View(this), lp(0, 1, 1));
+        }
+        TextView btn = text(13, probing ? Ui.MUTED : Ui.FG, true);
+        btn.setText(probing ? "查询中…" : "查询额度");
+        GradientDrawable bb = Ui.round(Color.TRANSPARENT, sdp(20));
+        bb.setStroke(Math.max(1, dp(1)), 0xFF3A3D44);
+        btn.setBackground(bb);
+        btn.setGravity(Gravity.CENTER);
+        btn.setPadding(sdp(16), 0, sdp(16), 0);
+        if (!probing) btn.setOnClickListener(v -> probeAll());
+        foot.addView(btn, lp(WRAP, sdp(40), 0));
+        add(foot, sdp(12));
+        if (probeMsg != null && !probing) add(note(probeMsg, Ui.MUTED), sdp(8));
+        if (proxy != null && proxy.on() && proxy.node == null) {
+            // 读不到节点名时说明原因，方便照着处理
+            add(note(!proxy.listening
+                    ? (Cfg.listenerGranted(this)
+                    ? "节点名：通知使用权已给但还没连上，关掉岛再开（不行就重启手机）"
+                    : "节点名：要在设置里给「通知使用权」")
+                    : !proxy.notif
+                    ? "节点名：没看到 NekoBox 通知（在系统里把 NekoBox 的通知打开）"
+                    : "节点名：NekoBox 通知里没有标题", Ui.MUTED), sdp(8));
+        }
+
+        // ── 调试：展开后长按才显示 ──
+        if (showDebug && Cfg.debug(this)) {
+            TextView t = note(debugText(now), Ui.GREY);
+            t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10 * k);
+            add(t, sdp(10));
+        }
     }
 
     private String debugText(long now) {
@@ -761,7 +1029,7 @@ public class IslandService extends Service {
         List<GproxyClient.Record> rs = null;
         List<GproxyClient.Flight> fl = null;
         GproxyClient.Record fresh = null;
-        List<String> ql = null;
+        List<QItem> ql = null;
         String err = null;
         ioDiag.polls++;
         ioDiag.lastPollAt = now;
@@ -842,7 +1110,7 @@ public class IslandService extends Service {
         final String ferr = err;
         final GproxyClient.LogFlags fflags = ioFlags;
         final Diag fdiag = ioDiag.copy();
-        final List<String> fql = ql;
+        final List<QItem> fql = ql;
         final ProxyCheck.State fproxy = ioProxy;
         final boolean fproxyAlert = proxyAlert;
         ui.post(() -> {
@@ -850,7 +1118,7 @@ public class IslandService extends Service {
             error = ferr;
             diag = fdiag;
             if (fflags != null) flags = fflags;
-            if (fql != null) quotaLines = fql;
+            if (fql != null) quota = fql;
             proxy = fproxy;
             if (fproxyAlert) {
                 Toast.makeText(this, fproxy != null && fproxy.on()
@@ -916,36 +1184,70 @@ public class IslandService extends Service {
                     lastErr = "NAI " + e.getMessage();
                 }
             }
-            List<String> ql = quotaSummary();
+            List<QItem> ql = quotaSummary();
             ioQuotaAt = System.currentTimeMillis();
             final String m = Cfg.hm(System.currentTimeMillis()) + " 已查 " + ok + " 个"
                     + (fail > 0 ? "，失败 " + fail + " 个" + (lastErr != null ? "：" + lastErr : "") : "");
             ui.post(() -> {
                 probing = false;
                 probeMsg = m;
-                quotaLines = ql;
+                quota = ql;
                 render();
             });
         });
     }
 
-    /** 展开岛里的额度摘要：只读 gproxy 存的历史，不请求上游 */
-    private List<String> quotaSummary() {
-        List<String> out = new ArrayList<>();
+    /** 展开面板里的额度：只读 gproxy 存的历史和本机上次查询，不请求上游 */
+    private List<QItem> quotaSummary() {
+        List<QItem> out = new ArrayList<>();
         try {
             for (GproxyClient.Cred c : client.credentials()) {
                 if (!c.enabled) continue;
                 GproxyClient.Quota q = Cfg.bestQuota(this, c.id, client.quotaHistory(c.id));
-                String line = Cfg.quotaLine(q);
-                if (line == null) continue;
-                out.add("额度 " + c.shortName + " · " + line);
+                if (q == null || q.rows.isEmpty()) continue;
+                QItem it = new QItem();
+                it.name = c.shortName;
+                it.at = q.at;
+                for (GproxyClient.QuotaRow r : q.rows) {
+                    String v = Cfg.quotaValue(r);
+                    if (v == null) continue;
+                    QRow row = new QRow(r.name, v);
+                    if (r.percent >= 0) {
+                        row.fill = (float) (r.percent / 100.0);
+                        row.color = Ui.usedColor(r.percent);
+                    }
+                    it.rows.add(row);
+                    long t = Cfg.exhaustAt(r, q.at);
+                    if (t > 0 && it.warn == null) it.warn = r.name + "额度按此速度" + Cfg.day(t) + "用完";
+                    if (it.rows.size() >= 3) break;
+                }
+                if (q.blockedUntil > System.currentTimeMillis()) it.warn = "被上游限流到 " + Cfg.hm(q.blockedUntil);
+                if (it.rows.isEmpty()) continue;
+                out.add(it);
                 if (out.size() >= 4) break;
             }
         } catch (Exception ignored) {
         }
         if (!Cfg.naiKey(this).isEmpty()) {
             NaiClient.Quota n = NaiClient.last(this);
-            out.add(n != null ? "额度 " + NaiClient.line(n) : "额度 NAI · 还没查询过");
+            QItem it = new QItem();
+            if (n == null) {
+                it.name = "NAI";
+                it.rows.add(new QRow("还没查询过", ""));
+            } else {
+                it.name = "NAI · " + n.tier;
+                it.at = n.at;
+                if (n.percent >= 0) {
+                    // NAI 给的是剩余量，条也画剩余
+                    QRow row = new QRow("V5", n.empty ? "用完" : "剩" + Math.round(n.percent) + "%");
+                    row.fill = n.empty ? 0f : (float) (n.percent / 100.0);
+                    row.color = n.empty ? Ui.RED : Ui.GREEN;
+                    it.rows.add(row);
+                }
+                if (n.anlas >= 0) it.rows.add(new QRow("Anlas", NaiClient.anlas(n.anlas)));
+                if (it.rows.isEmpty()) it.rows.add(new QRow("没有额度读数", ""));
+            }
+            out.add(it);
         }
         return out;
     }

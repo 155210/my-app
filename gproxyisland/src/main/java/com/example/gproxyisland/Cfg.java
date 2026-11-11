@@ -319,6 +319,12 @@ final class Cfg {
         return (s / 60) + "m" + String.format(Locale.US, "%02d", s % 60) + "s";
     }
 
+    /** 计时：0:12 / 1:05 / 61:20 */
+    static String clock(long ms) {
+        long s = Math.max(0, ms / 1000);
+        return (s / 60) + ":" + String.format(Locale.US, "%02d", s % 60);
+    }
+
     /** 完成耗时：12.3s */
     static String dur(long ms) {
         if (ms < 0) return "";
