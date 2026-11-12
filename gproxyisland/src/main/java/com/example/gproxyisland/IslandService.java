@@ -821,6 +821,16 @@ public class IslandService extends Service {
             }
             add(h, sdp(16));
         }
+        // 窗口名（5小时 / 7天 Fable…）按最长的那个定宽，不截断，进度条也对齐
+        int labW = sdp(40);
+        {
+            TextView probe = text(11, Ui.MUTED, false);
+            for (QItem q : quota)
+                for (QRow qr : q.rows)
+                    if (qr.fill >= 0 && qr.label != null)
+                        labW = Math.max(labW, (int) Math.ceil(probe.getPaint().measureText(qr.label)) + sdp(2));
+            labW = Math.min(labW, sdp(90));
+        }
         for (QItem q : quota) {
             LinearLayout r = hrow();
             TextView name = text(13, Ui.FG, false);
@@ -838,7 +848,7 @@ public class IslandService extends Service {
                 l.setEllipsize(TextUtils.TruncateAt.END);
                 l.setText(qr.label);
                 if (qr.fill >= 0) {
-                    line.addView(l, lp(sdp(40), WRAP, 0));
+                    line.addView(l, lp(labW, WRAP, 0));
                     LinearLayout.LayoutParams bp = lp(0, sdp(5), 1);
                     bp.leftMargin = sdp(6);
                     bp.rightMargin = sdp(8);
