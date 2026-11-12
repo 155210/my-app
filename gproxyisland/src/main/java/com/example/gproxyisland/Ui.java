@@ -268,6 +268,14 @@ final class Ui {
         private final RectF r = new RectF();
         private float fraction;
         private int color = GREEN;
+        /** 时间刻度（0~1），-1 = 不画。进度在刻度左边 = 用得比时间慢 */
+        private float mark = -1;
+
+        Bar mark(float m) {
+            this.mark = m;
+            invalidate();
+            return this;
+        }
 
         Bar(Context c) {
             super(c);
@@ -286,10 +294,17 @@ final class Ui {
             p.setColor(LINE);
             r.set(0, 0, w, h);
             c.drawRoundRect(r, rad, rad, p);
-            if (fraction <= 0) return;
-            p.setColor(color);
-            r.set(0, 0, Math.max(h, w * fraction), h);
-            c.drawRoundRect(r, rad, rad, p);
+            if (fraction > 0) {
+                p.setColor(color);
+                r.set(0, 0, Math.max(h, w * fraction), h);
+                c.drawRoundRect(r, rad, rad, p);
+            }
+            if (mark >= 0) {
+                float mw = Math.max(2f, h * 0.4f), x = Math.max(0, Math.min(w - mw, w * mark - mw / 2f));
+                p.setColor(FG);
+                r.set(x, 0, x + mw, h);
+                c.drawRect(r, p);
+            }
         }
     }
 }
