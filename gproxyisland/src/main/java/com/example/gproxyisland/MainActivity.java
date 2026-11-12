@@ -679,11 +679,17 @@ public class MainActivity extends Activity {
         header("预算与提醒");
         LinearLayout card = group(null);
         card.setPadding(dp(16), dp(2), dp(16), dp(16));
-        float b0 = Cfg.budget(this);
-        input(card, "每日预算（美元，0 = 不提醒）", b0 > 0 ? trim(b0) : "0",
+        float b0 = Cfg.manualBudget(this);
+        float a0 = Cfg.autoBudget(this);
+        switchRow(card, "跟随 7 天额度自动算",
+                a0 > 0 ? "今天算出来是 " + Cfg.money(a0) + "（剩余 ÷ 剩余天数，100% ≈ $" + Math.round(Cfg.WEEK_USD) + "）"
+                        : "每天第一次查询 Claude 额度时算一次，当天固定；没算出来就用下面手填的",
+                Cfg.budgetAuto(this), on -> sp().edit().putBoolean("budgetAuto", on).apply());
+        input(card, "手填每日预算（美元，0 = 不提醒）", b0 > 0 ? trim(b0) : "0",
                 InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL,
                 s -> sp().edit().putFloat("budget", Math.max(0f, parseF(s))).apply());
-        note(box, "设了预算后，岛上的圆点会变成进度环。用到 80% 变黄，超了变红，各提醒一次。", Ui.MUTED, dp(12));
+        note(box, "设了预算后，岛上的圆点会变成进度环。用到 80% 变黄，超了变红，各提醒一次。"
+                + "自动算的预算只按 gproxy 记到的花费比，不走 gproxy 的用量不算在「今日花费」里。", Ui.MUTED, dp(12));
         LinearLayout sw = group("提醒");
         switchRow(sw, "完成 / 失败提示", "请求结束时岛上显示 15 秒结果", Cfg.pop(this),
                 on -> sp().edit().putBoolean("pop", on).apply());
@@ -1162,6 +1168,9 @@ public class MainActivity extends Activity {
             int color = r.percent >= 0 ? Ui.usedColor(r.percent) : Ui.GREEN;
             meter(body, r.name, v == null ? "—" : v, r.percent >= 70 ? (r.percent >= 90 ? Ui.RED_SOFT : Ui.AMBER) : Ui.FG, extra,
                     r.percent >= 0 ? (float) (r.percent / 100.0) : -1, color);
+            Cfg.saveAutoBudget(this, r, q.at);
+            String pace = Cfg.paceLine(r);
+            if (pace != null) add(body, label(pace, 12, Ui.MUTED, false), dp(4));
             long ex = Cfg.exhaustAt(r, q.at);
             if (ex > 0) warnBox(body, "按此速度 " + Cfg.day(ex) + " 用完，早于重置（" + Cfg.day(r.resetAt) + "）", false);
         }

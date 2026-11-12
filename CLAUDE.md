@@ -13,6 +13,8 @@
 | `gproxyisland/` | gproxy 岛（顶部悬浮胶囊显示 gproxy 用量） | `.github/workflows/gproxyisland.yml` |
 
 > GitHub（155210/my-app）是主仓库，打包和发布照旧走上表的 Actions。2026-11-08 账号被封过两天，期间把代码搬到了 GitLab 私有项目 `1151032/app/my-app`（项目 ID `88673288`，调 API 用 ID），现在它和项目文件 `代码备份/` 一起当备份：推 GitHub 后顺手同步一份过去。
+>
+> **不要频繁往 GitHub 推送或开 PR**（账号被封过一次）：改动先在本地改完、编译验证好，攒成一次再推。
 
 改哪个 App 就只看哪个目录。改 toolbox 前先读 `toolbox/README.md`（结构、桥接口、对原插件的改动），改自制AI问答机前先读 `自制AI问答机/README.md`，改自然语言生图前先读 `自然语言生图/README.md`，改 gproxy 岛前先读 `gproxyisland/交接.md`（用户环境、待办、gproxy 接口和坑）和 `gproxyisland/README.md`，再只打开要改的文件。
 本地没有 Android SDK，验证靠推送后看 Actions 结果；toolbox 的网页层可以用无头浏览器单独测。

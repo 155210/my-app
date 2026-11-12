@@ -121,6 +121,10 @@ public class IslandService extends Service {
         String label, right;
         float fill = -1;
         int color = Ui.GREEN;
+        /** 进度条上的时间刻度（0~1），-1 = 没有 */
+        float mark = -1;
+        /** 紧跟在这行下面的一行小字（每天预算），null = 没有 */
+        String sub;
 
         QRow(String label, String right) {
             this.label = label;
@@ -821,6 +825,16 @@ public class IslandService extends Service {
             }
             add(h, sdp(16));
         }
+        // 窗口名（5小时 / 7天 Fable…）按最长的那个定宽，不截断，进度条也对齐
+        int labW = sdp(40);
+        {
+            TextView probe = text(11, Ui.MUTED, false);
+            for (QItem q : quota)
+                for (QRow qr : q.rows)
+                    if (qr.fill >= 0 && qr.label != null)
+                        labW = Math.max(labW, (int) Math.ceil(probe.getPaint().measureText(qr.label)) + sdp(2));
+            labW = Math.min(labW, sdp(90));
+        }
         for (QItem q : quota) {
             LinearLayout r = hrow();
             TextView name = text(13, Ui.FG, false);
@@ -838,11 +852,11 @@ public class IslandService extends Service {
                 l.setEllipsize(TextUtils.TruncateAt.END);
                 l.setText(qr.label);
                 if (qr.fill >= 0) {
-                    line.addView(l, lp(sdp(40), WRAP, 0));
+                    line.addView(l, lp(labW, WRAP, 0));
                     LinearLayout.LayoutParams bp = lp(0, sdp(5), 1);
                     bp.leftMargin = sdp(6);
                     bp.rightMargin = sdp(8);
-                    line.addView(new Ui.Bar(this).set(qr.fill, qr.color), bp);
+                    line.addView(new Ui.Bar(this).set(qr.fill, qr.color).mark(qr.mark), bp);
                 } else {
                     line.addView(l, lp(0, WRAP, 1));
                 }
@@ -853,6 +867,15 @@ public class IslandService extends Service {
                 LinearLayout.LayoutParams lpp = lp(MATCH, WRAP, 0);
                 if (i > 0) lpp.topMargin = sdp(5);
                 col.addView(line, lpp);
+                if (qr.sub != null) {
+                    // 每天预算：缩进到进度条下面，小一号的暗字，读起来是这一行的注脚
+                    TextView sub = text(10, Ui.GREY, false);
+                    sub.setText(qr.sub);
+                    LinearLayout.LayoutParams sp = lp(MATCH, WRAP, 0);
+                    sp.leftMargin = labW + sdp(6);
+                    sp.topMargin = sdp(2);
+                    col.addView(sub, sp);
+                }
             }
             r.addView(col, lp(0, WRAP, 1));
             add(r, sdp(10));
@@ -1217,6 +1240,9 @@ public class IslandService extends Service {
                         row.color = Ui.usedColor(r.percent);
                     }
                     it.rows.add(row);
+                    row.mark = Cfg.timeFrac(r);
+                    Cfg.saveAutoBudget(this, r, q.at);
+                    row.sub = Cfg.budgetShort(r);
                     long t = Cfg.exhaustAt(r, q.at);
                     if (t > 0 && it.warn == null) it.warn = r.name + "额度按此速度" + Cfg.day(t) + "用完";
                     if (it.rows.size() >= 3) break;

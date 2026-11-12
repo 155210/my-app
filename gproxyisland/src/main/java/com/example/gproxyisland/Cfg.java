@@ -124,6 +124,60 @@ final class Cfg {
         return t < r.resetAt && t > System.currentTimeMillis() - 3600_000L ? t : 0;
     }
 
+    /** 7 天额度 100% 大约值多少美元（用户估的，算每天可用金额用） */
+    static final double WEEK_USD = 800;
+
+    /**
+     * 7 天窗口的速度和每天预算：「时间过了 40%（用得偏快） · 剩 4.2 天，每天可用 18%（约 $147）」。
+     * 只算总的「7天」，按模型分的（7天 Fable 等）不算。百分比是上游（Claude 官方）给的，不走 gproxy 的用量也算在内。不是 7 天窗口或缺读数返回 null。
+     */
+    static String paceLine(GproxyClient.QuotaRow r) {
+        if (r == null || !"7天".equals(r.name) || r.percent < 0 || r.resetAt <= 0) return null;
+        long len = windowMs(r.name), now = System.currentTimeMillis();
+        long left = r.resetAt - now;
+        if (len <= 0 || left <= 0) return null;
+        if (left > len) left = len;
+        double timePct = (len - left) * 100.0 / len;
+        String speed = "";
+        if (timePct >= 5) {
+            if (r.percent > timePct + 5) speed = "（用得偏快）";
+            else if (r.percent < timePct - 5) speed = "（用得偏慢）";
+            else speed = "（正好）";
+        }
+        StringBuilder b = new StringBuilder("时间过了 ").append(Math.round(timePct)).append("%").append(speed);
+        double remain = Math.max(0, 100 - r.percent);
+        double days = left / 86400_000.0;
+        if (remain <= 0) return b.append(" · 已用完").toString();
+        if (days < 1) {
+            b.append(" · 重置前还能用 ").append(Math.round(remain)).append("%");
+        } else {
+            double per = remain / days;
+            b.append(" · 剩 ").append(String.format(java.util.Locale.US, "%.1f", days)).append(" 天，每天可用 ")
+                    .append(Math.round(per)).append("%");
+            remain = per;
+        }
+        return b.append("（约 $").append(Math.round(remain * WEEK_USD / 100)).append("）").toString();
+    }
+
+    /** 总的「7天」窗口时间过了多少（0~1），画进度条上的时间刻度用；别的窗口或缺读数 = -1 */
+    static float timeFrac(GproxyClient.QuotaRow r) {
+        if (r == null || !"7天".equals(r.name) || r.percent < 0 || r.resetAt <= 0) return -1;
+        long len = windowMs(r.name), left = r.resetAt - System.currentTimeMillis();
+        if (left <= 0) return -1;
+        return (float) Math.max(0, Math.min(1, (len - left) / (double) len));
+    }
+
+    /** 岛上用的短版每天预算：「剩 4.0 天 · 每天 19% ≈ $149」，一行放得下；没有 = null */
+    static String budgetShort(GproxyClient.QuotaRow r) {
+        if (timeFrac(r) < 0) return null;
+        double remain = Math.max(0, 100 - r.percent);
+        if (remain <= 0) return null;
+        double days = (r.resetAt - System.currentTimeMillis()) / 86400_000.0;
+        if (days < 1) return "重置前还剩 " + Math.round(remain) + "% ≈ $" + Math.round(remain * WEEK_USD / 100);
+        double per = remain / days;
+        return "剩 " + String.format(java.util.Locale.US, "%.1f", days) + " 天 · 每天 " + Math.round(per) + "% ≈ $" + Math.round(per * WEEK_USD / 100);
+    }
+
     /** 今天 09:00 / 明天 09:00 / 周一 09:00 */
     static String day(long ms) {
         java.util.Calendar a = java.util.Calendar.getInstance(), b = java.util.Calendar.getInstance();
@@ -181,9 +235,49 @@ final class Cfg {
         return sp(c).getBoolean("vibrate", true);
     }
 
-    /** 每日预算（美元），0 = 不提醒 */
+    /** 每日预算（美元），0 = 不提醒。开了「跟随 7 天额度」且今天算过，就用算出来的 */
     static float budget(Context c) {
+        float a = autoBudget(c);
+        return a > 0 ? a : manualBudget(c);
+    }
+
+    /** 手填的每日预算 */
+    static float manualBudget(Context c) {
         return Math.max(0f, sp(c).getFloat("budget", 0f));
+    }
+
+    /** 每日预算跟随 7 天额度自动算（默认开） */
+    static boolean budgetAuto(Context c) {
+        return sp(c).getBoolean("budgetAuto", true);
+    }
+
+    /** 今天按 7 天额度算出的预算，没开或今天还没算 = 0 */
+    static float autoBudget(Context c) {
+        if (!budgetAuto(c)) return 0;
+        String s = sp(c).getString("autoBudget", "");
+        String p = today() + ":";
+        if (!s.startsWith(p)) return 0;
+        try { return Float.parseFloat(s.substring(p.length())); } catch (Exception e) { return 0; }
+    }
+
+    /** 每天可用多少美元（剩余% ÷ 剩余天数 × $800/100），不是总「7天」或缺读数 = -1 */
+    static double perDayUsd(GproxyClient.QuotaRow r) {
+        if (timeFrac(r) < 0) return -1;
+        double remain = Math.max(0, 100 - r.percent);
+        double days = Math.max(1, (r.resetAt - System.currentTimeMillis()) / 86400_000.0);
+        return remain / days * WEEK_USD / 100;
+    }
+
+    /**
+     * 拿到今天的「7天」读数时，算一次今天的预算并记下。一天只算第一次，
+     * 不然白天用掉的会让预算越算越小。读数是昨天的不算。
+     */
+    static void saveAutoBudget(Context c, GproxyClient.QuotaRow r, long at) {
+        if (at <= 0 || !today().equals(dayKey(at))) return;
+        if (sp(c).getString("autoBudget", "").startsWith(today() + ":")) return;
+        double v = perDayUsd(r);
+        if (v < 0) return;
+        sp(c).edit().putString("autoBudget", today() + ":" + Math.round(v * 100) / 100.0).apply();
     }
 
     /** GitLab 只读令牌（项目是私有的，检查更新要带；只存本机，不进代码） */
@@ -288,6 +382,10 @@ final class Cfg {
 
     static String today() {
         return new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(new Date());
+    }
+
+    static String dayKey(long ms) {
+        return new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(new Date(ms));
     }
 
     /** 1.53万 风格；≥1万 保留一位小数 */
