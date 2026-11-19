@@ -3,6 +3,8 @@ package com.example.photorange;
 import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.ActivityNotFoundException;
+import android.content.ClipData;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
@@ -26,6 +28,7 @@ import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.LinearLayout;
+import android.widget.ListView;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.Spinner;
@@ -35,6 +38,7 @@ import android.widget.Toast;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Calendar;
+import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -52,6 +56,9 @@ public class MainActivity extends Activity {
     private static final int BG = 0xFF121316, CARD = 0xFF1B1D22, FG = 0xFFF1EFE8, MUTED = 0xFFA3A199;
     private static final int ACCENT = 0xFF5B8DEF, AMBER = 0xFFEF9F27, RED = 0xFFE24B4A, GREEN = 0xFF5DCAA5;
     private static final int REQ_PERM = 1;
+    private static final String BAIDU_PKG = "com.baidu.netdisk";
+    /** 一次交给网盘多少个：太多会超出系统单次传递的上限 */
+    private static final int[] BATCH_SIZES = {50, 100, 200, 500};
 
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
@@ -62,7 +69,7 @@ public class MainActivity extends Activity {
     private LinearLayout histBox;
     private CheckBox cbRecursive, cbVideo, cbMtime, cbByMonth;
     private Spinner spFromY, spFromM, spToY, spToM;
-    private Button btnScan, btnCopy, btnCancel;
+    private Button btnScan, btnCopy, btnBaidu, btnCancel;
     private ProgressBar progress;
 
     private File srcDir, dstDir;
@@ -277,6 +284,10 @@ public class MainActivity extends Activity {
         btnCopy = button("开始复制", true);
         btnCopy.setOnClickListener(v -> confirmCopy());
         root.addView(btnCopy, topMargin(dp(14)));
+        btnBaidu = button("上传到百度网盘（不复制，直接交给网盘 App）", false);
+        btnBaidu.setMinHeight(dp(50));
+        btnBaidu.setOnClickListener(v -> shareToBaidu());
+        root.addView(btnBaidu, topMargin(dp(8)));
         progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         progress.setMax(1000);
         progress.setVisibility(View.GONE);
@@ -564,11 +575,124 @@ public class MainActivity extends Activity {
         updateButtons();
     }
 
+    // ───────────────────────── 上传到百度网盘 ─────────────────────────
+
+    /** 把范围内的照片分批交给百度网盘 App，在它里面选网盘文件夹上传 */
+    private void shareToBaidu() {
+        List<PhotoScanner.Item> sel = selected();
+        if (sel.isEmpty()) {
+            Toast.makeText(this, "范围内没有照片", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        Collections.sort(sel, (a, b) -> a.file.getName().compareTo(b.file.getName()));
+        showBatchDialog(sel);
+    }
+
+    private void showBatchDialog(final List<PhotoScanner.Item> sel) {
+        final int per = prefs.getInt("batch", 200);
+        final int n = (sel.size() + per - 1) / per;
+        final boolean[] sent = new boolean[n];
+        final ArrayAdapter<String> ad = new ArrayAdapter<>(this,
+                android.R.layout.simple_list_item_1, new ArrayList<String>());
+        final Runnable fill = () -> {
+            ad.clear();
+            for (int i = 0; i < n; i++) {
+                int from = i * per, to = Math.min(sel.size(), from + per);
+                long bytes = 0;
+                for (int k = from; k < to; k++) bytes += sel.get(k).size;
+                ad.add(String.format(Locale.ROOT, "%s第 %d 批：%d 个，%s\n%s ～ %s",
+                        sent[i] ? "✓ 已发送  " : "", i + 1, to - from, size(bytes),
+                        sel.get(from).file.getName(), sel.get(to - 1).file.getName()));
+            }
+            ad.notifyDataSetChanged();
+        };
+        fill.run();
+
+        ListView lv = new ListView(this);
+        TextView hint = text(n > 1
+                ? "点一批 → 在百度网盘里选上传位置 → 回到这里再点下一批。"
+                : "点下面这一批 → 在百度网盘里选上传位置。", 13, MUTED);
+        hint.setPadding(dp(20), dp(6), dp(20), dp(8));
+        lv.addHeaderView(hint, null, false);
+        lv.setAdapter(ad);
+        final AlertDialog dlg = new AlertDialog.Builder(this)
+                .setTitle(String.format(Locale.ROOT, "%s ～ %s 共 %d 个", ymLabel(fromYm), ymLabel(toYm), sel.size()))
+                .setView(lv)
+                .setPositiveButton("关闭", null)
+                .setNeutralButton("每批 " + per + " 个 ▸", null)
+                .create();
+        lv.setOnItemClickListener((p, v, pos, id) -> {
+            int i = (int) id; // 有表头，用 id 才是第几批
+            if (i < 0 || i >= n) return;
+            int from = i * per, to = Math.min(sel.size(), from + per);
+            if (sendToBaidu(new ArrayList<>(sel.subList(from, to)))) {
+                sent[i] = true;
+                fill.run();
+            }
+        });
+        dlg.setOnShowListener(d -> dlg.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> {
+            // 轮流切换每批数量：网盘那边一次吃不下就调小
+            int next = BATCH_SIZES[0];
+            for (int k = 0; k < BATCH_SIZES.length; k++) {
+                if (BATCH_SIZES[k] == per) next = BATCH_SIZES[(k + 1) % BATCH_SIZES.length];
+            }
+            prefs.edit().putInt("batch", next).apply();
+            dlg.dismiss();
+            showBatchDialog(sel);
+        }));
+        dlg.show();
+    }
+
+    /** @return true = 已经调起了网盘（或系统分享面板） */
+    private boolean sendToBaidu(List<PhotoScanner.Item> items) {
+        ArrayList<Uri> uris = new ArrayList<>();
+        boolean allImages = true;
+        for (PhotoScanner.Item it : items) {
+            uris.add(ShareProvider.uriFor(it.file));
+            if (!PhotoScanner.isMedia(it.file.getName(), false)) allImages = false;
+        }
+        Intent i;
+        if (uris.size() == 1) {
+            i = new Intent(Intent.ACTION_SEND);
+            i.putExtra(Intent.EXTRA_STREAM, uris.get(0));
+        } else {
+            i = new Intent(Intent.ACTION_SEND_MULTIPLE);
+            i.putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris);
+        }
+        i.setType(allImages ? "image/*" : "*/*");
+        // 读权限要靠 ClipData 才会覆盖到每一个文件
+        ClipData clip = ClipData.newRawUri("photos", uris.get(0));
+        for (int k = 1; k < uris.size(); k++) clip.addItem(new ClipData.Item(uris.get(k)));
+        i.setClipData(clip);
+        i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        i.setPackage(BAIDU_PKG);
+        try {
+            startActivity(i);
+            return true;
+        } catch (ActivityNotFoundException e) {
+            // 没装百度网盘（或装的是别的版本）：退回系统分享面板自己挑
+            i.setPackage(null);
+            try {
+                Toast.makeText(this, "没找到百度网盘 App，请在列表里自己选", Toast.LENGTH_LONG).show();
+                startActivity(Intent.createChooser(i, "发送到"));
+                return true;
+            } catch (Exception e2) {
+                Toast.makeText(this, "发送失败：" + e2.getMessage(), Toast.LENGTH_LONG).show();
+                return false;
+            }
+        } catch (Exception e) {
+            Toast.makeText(this, "发送失败，把每批数量调小再试：" + e.getMessage(), Toast.LENGTH_LONG).show();
+            return false;
+        }
+    }
+
     private void updateButtons() {
         if (btnCopy == null) return;
         boolean ok = !copying && !scanning && scan != null && fromYm <= toYm && hasStoragePermission();
         btnCopy.setEnabled(ok);
         btnCopy.setAlpha(ok ? 1f : 0.4f);
+        btnBaidu.setEnabled(ok);
+        btnBaidu.setAlpha(ok ? 1f : 0.4f);
         btnScan.setEnabled(!copying);
     }
 

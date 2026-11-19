@@ -11,6 +11,11 @@
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="29" />
 
+    <!-- 「上传到百度网盘」：把选中的照片交给百度网盘 App -->
+    <queries>
+        <package android:name="com.baidu.netdisk" />
+    </queries>
+
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
@@ -29,5 +34,12 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- 分享照片给百度网盘时用：只读、不导出，按次授权 -->
+        <provider
+            android:name=".ShareProvider"
+            android:authorities="com.example.photorange.share"
+            android:exported="false"
+            android:grantUriPermissions="true" />
     </application>
 </manifest>
