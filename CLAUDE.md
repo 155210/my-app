@@ -11,6 +11,7 @@
 | `自制AI问答机/` | 自制AI问答机（纯净提问窗口，导入酒馆预设、自定义 API） | `.github/workflows/自制AI问答机.yml` |
 | `自然语言生图/` | 自然语言生图（中文描述 → AI 写正负面提示词 → NovelAI 出图） | `.github/workflows/自然语言生图.yml` |
 | `gproxyisland/` | gproxy 岛（顶部悬浮胶囊显示 gproxy 用量） | `.github/workflows/gproxyisland.yml` |
+| `photorange/` | 照片按月复制（按文件名日期选年月范围，复制到指定文件夹） | `.github/workflows/photorange.yml` |
 
 > GitHub（155210/my-app）是主仓库，打包和发布照旧走上表的 Actions。2026-11-08 账号被封过两天，期间把代码搬到了 GitLab 私有项目 `1151032/app/my-app`（项目 ID `88673288`，调 API 用 ID），现在它和项目文件 `代码备份/` 一起当备份：推 GitHub 后顺手同步一份过去。
 >
