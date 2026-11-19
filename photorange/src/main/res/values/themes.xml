@@ -1,13 +1,29 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="bg">#FF121316</color>
-    <color name="accent">#FF5B8DEF</color>
-    <color name="icon_bg">#FF1B2A4A</color>
+    <!-- 蓝晒配色：普鲁士蓝的底、相纸白的字、日光黄的强调。代码里的同一套颜色在 Ui.java -->
+    <color name="bg">#FF0F274A</color>
+    <color name="panel">#FF173963</color>
+    <color name="paper">#FFF5F2E9</color>
+    <color name="mist">#FFA9BEDB</color>
+    <color name="sun">#FFFFC857</color>
+    <color name="icon_bg">#FF0F274A</color>
 
     <style name="AppTheme" parent="@android:style/Theme.Material.NoActionBar">
         <item name="android:windowBackground">@color/bg</item>
         <item name="android:statusBarColor">@color/bg</item>
         <item name="android:navigationBarColor">@color/bg</item>
-        <item name="android:colorAccent">@color/accent</item>
+        <item name="android:colorAccent">@color/sun</item>
+        <item name="android:colorBackgroundFloating">@color/panel</item>
+        <item name="android:textColorPrimary">@color/paper</item>
+        <item name="android:textColorSecondary">@color/mist</item>
+        <item name="android:alertDialogTheme">@style/AppDialog</item>
+    </style>
+
+    <!-- 弹窗（确认复制、选文件夹、分批发送）跟主界面一个色系 -->
+    <style name="AppDialog" parent="@android:style/Theme.Material.Dialog.Alert">
+        <item name="android:colorAccent">@color/sun</item>
+        <item name="android:colorBackgroundFloating">@color/panel</item>
+        <item name="android:textColorPrimary">@color/paper</item>
+        <item name="android:textColorSecondary">@color/mist</item>
     </style>
 </resources>

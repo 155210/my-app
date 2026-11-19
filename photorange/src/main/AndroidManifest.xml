@@ -38,7 +38,7 @@
         <!-- 分享照片给百度网盘时用：只读、不导出，按次授权 -->
         <provider
             android:name=".ShareProvider"
-            android:authorities="com.example.photorange.share"
+            android:authorities="photorange"
             android:exported="false"
             android:grantUriPermissions="true" />
     </application>

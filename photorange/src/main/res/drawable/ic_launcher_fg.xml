@@ -1,16 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 108x108 自适应图标前景：一张照片（山 + 太阳）叠在日历上 -->
+<!-- 108x108 自适应图标前景：一排按月的柱子，中间选中的一段是日光黄（就是 App 里的时间轴） -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="108" android:viewportHeight="108">
-    <!-- 日历底板 -->
-    <path android:fillColor="#FF5B8DEF"
-        android:pathData="M36,30 L76,30 C79.3,30 82,32.7 82,36 L82,70 C82,73.3 79.3,76 76,76 L36,76 C32.7,76 30,73.3 30,70 L30,36 C30,32.7 32.7,30 36,30 Z" />
-    <!-- 照片 -->
-    <path android:fillColor="#FFFFFFFF"
-        android:pathData="M30,42 L70,42 C72.2,42 74,43.8 74,46 L74,74 C74,76.2 72.2,78 70,78 L30,78 C27.8,78 26,76.2 26,74 L26,46 C26,43.8 27.8,42 30,42 Z" />
-    <path android:fillColor="#FF1B2A4A"
-        android:pathData="M30,72 L42,56 L50,66 L56,60 L70,72 Z" />
-    <path android:fillColor="#FFEF9F27"
-        android:pathData="M60,48 C62.8,48 65,50.2 65,53 C65,55.8 62.8,58 60,58 C57.2,58 55,55.8 55,53 C55,50.2 57.2,48 60,48 Z" />
+    <path android:fillColor="#FF6C91C6"
+        android:pathData="M31,58 L37,58 Q38,58 38,59 L38,72 L30,72 L30,59 Q30,58 31,58 Z" />
+    <path android:fillColor="#FFFFC857"
+        android:pathData="M41,46 L47,46 Q48,46 48,47 L48,72 L40,72 L40,47 Q40,46 41,46 Z" />
+    <path android:fillColor="#FFFFC857"
+        android:pathData="M51,36 L57,36 Q58,36 58,37 L58,72 L50,72 L50,37 Q50,36 51,36 Z" />
+    <path android:fillColor="#FFFFC857"
+        android:pathData="M61,50 L67,50 Q68,50 68,51 L68,72 L60,72 L60,51 Q60,50 61,50 Z" />
+    <path android:fillColor="#FF6C91C6"
+        android:pathData="M71,62 L77,62 Q78,62 78,63 L78,72 L70,72 L70,63 Q70,62 71,62 Z" />
+    <path android:fillColor="#FFF5F2E9"
+        android:pathData="M30,75 L78,75 L78,77 L30,77 Z" />
 </vector>
